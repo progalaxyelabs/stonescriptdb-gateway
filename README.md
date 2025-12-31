@@ -1,5 +1,8 @@
 # Database Gateway
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/progalaxyelabs/stonescriptdb-gateway)](https://github.com/progalaxyelabs/stonescriptdb-gateway/releases)
+
 Rust-based multi-tenant database gateway and schema orchestrator for PostgreSQL function-based platforms.
 
 ## Overview
@@ -13,6 +16,37 @@ This service acts as a centralized database proxy and schema orchestrator for mu
 - **Connection Pooling**: Shared pool across all platforms (max 200 connections)
 - **Tenant Lifecycle**: Create and manage tenant databases
 - **IP-based Security**: No API keys needed for internal services
+
+## Quick Start
+
+### Installation from Release
+
+```bash
+# Clone specific version
+git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
+cd db-gateway
+git checkout v1.0.0
+
+# Install as systemd service
+sudo ./deploy/install.sh
+
+# Configure
+sudo nano /opt/db-gateway/.env
+
+# Start
+sudo systemctl start db-gateway
+```
+
+### Updating to Latest Release
+
+```bash
+cd /path/to/db-gateway
+git fetch --tags
+git checkout v1.1.0  # or latest version
+cargo build --release
+sudo cp target/release/db-gateway /opt/db-gateway/
+sudo systemctl restart db-gateway
+```
 
 ## How It Works
 
@@ -63,7 +97,13 @@ See [HLD.md](./HLD.md) for detailed architecture documentation.
 
 ## Development
 
+### Local Build
+
 ```bash
+# Clone
+git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
+cd db-gateway
+
 # Setup
 cargo build
 
@@ -78,6 +118,27 @@ cargo test
 # Build release
 cargo build --release
 ```
+
+### Production Deployment (systemd)
+
+```bash
+# Install as systemd service
+sudo ./deploy/install.sh
+
+# Configure
+sudo nano /opt/db-gateway/.env
+
+# Start service
+sudo systemctl start db-gateway
+
+# Check status
+sudo systemctl status db-gateway
+
+# View logs
+sudo journalctl -u db-gateway -f
+```
+
+See `deploy/` directory for installation scripts and systemd service file.
 
 ## Environment Variables
 
@@ -104,6 +165,27 @@ postgresql/
 └── seeders/           # Initial data (optional)
 ```
 
+## StoneScriptPHP Integration
+
+If using StoneScriptPHP, these CLI commands are available:
+
+```bash
+# Export schema as tar.gz
+php stone schema:export
+
+# Register with gateway on container startup
+php stone gateway:register
+
+# Hot migrate schema to running gateway
+php stone gateway:migrate
+```
+
+## Links
+
+- **GitHub:** https://github.com/progalaxyelabs/stonescriptdb-gateway
+- **Issues:** https://github.com/progalaxyelabs/stonescriptdb-gateway/issues
+- **Releases:** https://github.com/progalaxyelabs/stonescriptdb-gateway/releases
+
 ## License
 
-MIT License - Open Source
+MIT License - See [LICENSE](./LICENSE)

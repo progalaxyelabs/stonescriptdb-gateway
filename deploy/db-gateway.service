@@ -1,0 +1,45 @@
+[Unit]
+Description=DB Gateway - Multi-tenant PostgreSQL Proxy
+Documentation=https://bitbucket.org/progalaxyelabs/db-gateway
+After=network.target postgresql.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=db-gateway
+Group=db-gateway
+WorkingDirectory=/opt/db-gateway
+
+# Main executable
+ExecStart=/opt/db-gateway/db-gateway
+
+# Environment file
+EnvironmentFile=/opt/db-gateway/.env
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/opt/db-gateway/schemas /opt/db-gateway/logs
+ReadOnlyPaths=/opt/db-gateway
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=db-gateway
+
+[Install]
+WantedBy=multi-user.target

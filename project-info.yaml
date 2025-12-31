@@ -3,15 +3,15 @@
 
 name: db-gateway
 display_name: Database Gateway
-description: Rust-based multi-tenant database gateway/proxy for all platform APIs. Handles tenant routing, connection pooling, and database registry.
+description: Rust-based multi-tenant database gateway and schema orchestrator. Receives postgresql folder from platforms, runs migrations, deploys functions, routes queries to correct tenant database. Designed for PostgreSQL function-based platforms like StoneScriptPHP.
 
 # Project classification
 project_type: standalone
-project_purpose: internal-tool
+project_purpose: library
 project_status: planning
-business_model: internal
+business_model: open-source
 ownership: progalaxy
-domain: infrastructure
+domain: tools
 
 # Technical details
 tech_stack:

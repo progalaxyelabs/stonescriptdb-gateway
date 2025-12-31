@@ -3,28 +3,27 @@
 ## 1. Overview
 
 ### 1.1 Purpose
-The Database Gateway is a Rust-based service that acts as a centralized database proxy for all multi-tenant platforms at Progalaxy E-Labs. Instead of each platform API connecting directly to PostgreSQL, they connect to this gateway which handles:
+The Database Gateway is a Rust-based service that acts as a centralized database proxy and schema orchestrator for multi-tenant platforms using PostgreSQL stored functions (like StoneScriptPHP).
 
-- **Tenant Routing**: Maps platform + tenant_id to the correct database
-- **Connection Pooling**: Shared pool across all platforms (efficient resource usage)
-- **Database Registry**: Tracks which databases exist per platform
-- **Query Execution**: Parameterized query execution with logging
-- **Metrics**: Prometheus-compatible metrics for monitoring
+**Core responsibilities:**
+- **Schema Management**: Receive postgresql folder from platforms, run migrations, deploy functions
+- **Query Routing**: Route function calls to correct tenant database
+- **Connection Pooling**: Shared pool across all platforms
+- **Tenant Lifecycle**: Create/manage tenant databases
 
 ### 1.2 Problem Statement
-Our platforms (medstoreapp, instituteapp, etc.) are multi-tenant SaaS applications where each customer (clinic, school, business) gets their own database. With 8+ platforms and potentially hundreds of tenant databases:
-
-- Direct connections from each API replica would exhaust PostgreSQL connections
-- No central visibility into which databases exist
-- Each platform would need duplicate connection pooling logic
-- Difficult to implement cross-cutting concerns (logging, rate limiting)
+Multi-tenant SaaS platforms where each customer gets their own database face challenges:
+- Direct connections from each API replica exhaust PostgreSQL connections
+- No central visibility into database schemas across tenants
+- Schema migrations must be coordinated across hundreds of databases
+- Each platform duplicates connection pooling logic
 
 ### 1.3 Solution
-A single Rust service running on the PostgreSQL VM that:
-- Maintains a shared connection pool (max 200 connections)
-- Routes requests to correct tenant database
-- Provides admin APIs for database lifecycle management
-- Exposes metrics for monitoring
+A single Rust service that:
+- Receives schema files (tar.gz) from platforms on container startup
+- Manages migrations and function deployments centrally
+- Provides connection pooling (max 200 connections shared)
+- Routes queries to correct tenant database
 
 ## 2. Architecture
 
@@ -32,236 +31,313 @@ A single Rust service running on the PostgreSQL VM that:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        Docker Swarm Cluster                              │
+│                      Platform Container Startup                          │
 │                                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
-│  │ medstoreapp  │  │ instituteapp │  │ btechrecruiter│  ... more        │
-│  │     API      │  │     API      │  │     API      │                   │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                   │
-│         │                 │                 │                            │
-└─────────┼─────────────────┼─────────────────┼────────────────────────────┘
-          │                 │                 │
-          │    Internal Network (10.0.1.x)    │
-          │                 │                 │
-          ▼                 ▼                 ▼
+│  1. Container starts                                                     │
+│  2. php stone schema:export → /tmp/postgresql.tar.gz                    │
+│  3. POST /register with tar.gz                                          │
+│  4. Wait for "ready" response                                           │
+│  5. php stone serve                                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                     vm-postgres-primary (10.0.1.6)                       │
+│                     DB Gateway (vm-postgres-primary)                     │
 │                                                                          │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                    DB Gateway (port 9000)                          │  │
+│  │                      Rust Service (port 9000)                      │  │
 │  │                                                                    │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌──────────┐  │  │
-│  │  │   Axum      │  │   Tenant    │  │  Connection │  │ Metrics  │  │  │
-│  │  │   Router    │  │   Router    │  │    Pool     │  │ Exporter │  │  │
-│  │  │             │  │             │  │  (deadpool) │  │          │  │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘  └──────────┘  │  │
+│  │  POST /register                                                    │  │
+│  │    1. Extract postgresql.tar.gz                                   │  │
+│  │    2. Ensure database exists (CREATE DATABASE IF NOT EXISTS)      │  │
+│  │    3. Run pending migrations                                       │  │
+│  │    4. Deploy all functions (CREATE OR REPLACE FUNCTION)           │  │
+│  │    5. Return "ready"                                               │  │
+│  │                                                                    │  │
+│  │  POST /migrate                                                     │  │
+│  │    1. Extract postgresql.tar.gz                                   │  │
+│  │    2. Run migrations on specified tenant(s)                       │  │
+│  │    3. Update functions                                             │  │
+│  │                                                                    │  │
+│  │  POST /call                                                        │  │
+│  │    1. Route to correct tenant database                            │  │
+│  │    2. Execute: SELECT * FROM function_name($1, $2, ...)          │  │
+│  │    3. Return result                                                │  │
+│  │                                                                    │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                    │                                     │
-│                                    ▼                                     │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                    PostgreSQL 16 (port 5432)                       │  │
-│  │                         16GB RAM                                   │  │
 │  │                                                                    │  │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │  │
-│  │  │ medstoreapp_main│  │medstoreapp_     │  │medstoreapp_     │    │  │
-│  │  │                 │  │  clinic_001     │  │  clinic_002     │    │  │
-│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘    │  │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │  │
-│  │  │instituteapp_main│  │instituteapp_    │  │instituteapp_    │    │  │
-│  │  │                 │  │  school_001     │  │  school_002     │    │  │
-│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘    │  │
-│  │                    ... hundreds of databases ...                   │  │
+│  │  platform_main databases:                                          │  │
+│  │    medstoreapp_main, instituteapp_main, progalaxy_main, ...       │  │
+│  │                                                                    │  │
+│  │  tenant databases:                                                 │  │
+│  │    medstoreapp_clinic_001, medstoreapp_clinic_002, ...            │  │
+│  │    instituteapp_school_001, instituteapp_school_002, ...          │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Component Design
+### 2.2 Dev vs Prod Environment
 
 ```
-db-gateway/
-├── src/
-│   ├── main.rs              # Entry point, server setup
-│   ├── config.rs            # Environment configuration
-│   ├── error.rs             # Error types
-│   ├── pool/
-│   │   ├── mod.rs
-│   │   ├── manager.rs       # Pool lifecycle management
-│   │   └── registry.rs      # Database registry (which DBs exist)
-│   ├── router/
-│   │   ├── mod.rs
-│   │   └── tenant.rs        # Platform + tenant_id → database name
-│   ├── api/
-│   │   ├── mod.rs
-│   │   ├── health.rs        # GET /health
-│   │   ├── query.rs         # POST /query
-│   │   ├── admin.rs         # Admin endpoints
-│   │   └── middleware.rs    # Auth, logging, rate limiting
-│   └── metrics.rs           # Prometheus metrics
-├── Cargo.toml
-├── Dockerfile
-├── docker-compose.yaml
-└── .env.example
+DEV (Local Machine):
+  Platform (php stone serve) → localhost:9000 → localhost:5432
+
+PROD (Azure VNet):
+  Platform (Swarm container) → 10.0.1.6:9000 → 10.0.1.6:5432
 ```
 
-## 3. Data Model
+Same codebase, different `DB_GATEWAY_URL` environment variable.
 
-### 3.1 Database Naming Convention
+## 3. API Design
 
-| Type | Pattern | Example |
-|------|---------|---------|
-| Main DB | `{platform}_main` | `medstoreapp_main` |
-| Tenant DB | `{platform}_{tenant_id}` | `medstoreapp_clinic_001` |
+### 3.1 POST /register
 
-### 3.2 In-Memory Registry
+Container startup - creates DB if needed, runs migrations, deploys functions.
 
-```rust
-struct DatabaseRegistry {
-    // platform -> set of tenant_ids
-    databases: DashMap<String, HashSet<String>>,
-}
+**Request:**
+```
+POST /register
+Content-Type: multipart/form-data
 
-// Populated on startup by querying pg_database
-// Updated when create/drop tenant DB
+platform: medstoreapp
+tenant_id: clinic_001    (optional, null = main DB)
+schema: <postgresql.tar.gz>
 ```
 
-### 3.3 Connection Pool Structure
-
-```rust
-struct PoolManager {
-    // database_name -> connection pool
-    pools: DashMap<String, Pool<PostgresConnectionManager>>,
-
-    // LRU tracking for idle pool eviction
-    last_used: DashMap<String, Instant>,
-
-    // Global connection counter
-    total_connections: AtomicUsize,
+**Response (200):**
+```json
+{
+  "status": "ready",
+  "database": "medstoreapp_clinic_001",
+  "migrations_applied": 3,
+  "functions_deployed": 76,
+  "execution_time_ms": 1250
 }
 ```
 
-## 4. API Design
+**Tar.gz structure:**
+```
+postgresql/
+├── functions/
+│   ├── get_patient_by_id.pssql
+│   ├── list_appointments.pssql
+│   └── ... (all .pssql function files)
+├── migrations/
+│   ├── 001_initial.pssql
+│   ├── 002_add_prescriptions.pssql
+│   └── ... (ordered migration files)
+├── tables/
+│   └── ... (table definitions, for reference)
+└── seeders/
+    └── ... (initial data, optional)
+```
 
-### 4.1 Query Execution
+### 3.2 POST /migrate
 
-```http
-POST /query
-Content-Type: application/json
-X-API-Key: {platform_api_key}
+Hot update - deploy new schema without container restart.
 
+**Request:**
+```
+POST /migrate
+Content-Type: multipart/form-data
+
+platform: medstoreapp
+tenant_id: clinic_001    (optional, null = ALL tenant DBs for this platform)
+schema: <postgresql.tar.gz>
+```
+
+**Response (200):**
+```json
+{
+  "status": "completed",
+  "databases_updated": [
+    "medstoreapp_main",
+    "medstoreapp_clinic_001",
+    "medstoreapp_clinic_002"
+  ],
+  "migrations_applied": 1,
+  "functions_updated": 76,
+  "execution_time_ms": 3500
+}
+```
+
+### 3.3 POST /call
+
+Execute a database function.
+
+**Request:**
+```json
 {
   "platform": "medstoreapp",
-  "tenant_id": "clinic_001",    // null for main DB
-  "query": "SELECT * FROM patients WHERE id = $1",
+  "tenant_id": "clinic_001",
+  "function": "get_patient_by_id",
   "params": [123]
 }
+```
 
-Response 200:
+**Response (200):**
+```json
 {
-  "rows": [...],
+  "rows": [
+    {
+      "o_patient_id": 123,
+      "o_name": "John Doe",
+      "o_phone": "+91-9876543210"
+    }
+  ],
   "row_count": 1,
   "execution_time_ms": 5
 }
 ```
 
-### 4.2 Admin: Create Tenant Database
+### 3.4 GET /health
 
-```http
-POST /admin/create-tenant-db
-Content-Type: application/json
-X-API-Key: {admin_api_key}
-
+**Response (200):**
+```json
 {
-  "platform": "medstoreapp",
-  "tenant_id": "clinic_042",
-  "template": "medstoreapp_template"  // optional
-}
-
-Response 201:
-{
-  "database": "medstoreapp_clinic_042",
-  "created": true
+  "status": "healthy",
+  "postgres_connected": true,
+  "active_pools": 15,
+  "total_connections": 45,
+  "uptime_seconds": 86400
 }
 ```
 
-### 4.3 Admin: List Databases
+### 3.5 GET /admin/databases
 
-```http
+List all databases for a platform.
+
+**Request:**
+```
 GET /admin/databases?platform=medstoreapp
-X-API-Key: {admin_api_key}
+```
 
-Response 200:
+**Response (200):**
+```json
 {
   "platform": "medstoreapp",
   "databases": [
-    {"name": "medstoreapp_main", "type": "main"},
-    {"name": "medstoreapp_clinic_001", "type": "tenant"},
-    {"name": "medstoreapp_clinic_002", "type": "tenant"}
+    {"name": "medstoreapp_main", "type": "main", "size_mb": 125},
+    {"name": "medstoreapp_clinic_001", "type": "tenant", "size_mb": 45},
+    {"name": "medstoreapp_clinic_002", "type": "tenant", "size_mb": 32}
   ],
   "count": 3
 }
 ```
 
-### 4.4 Health Check
+### 3.6 POST /admin/create-tenant
 
-```http
-GET /health
+Create a new tenant database.
 
-Response 200:
+**Request:**
+```json
 {
-  "status": "healthy",
-  "postgres_connected": true,
-  "active_pools": 15,
-  "total_connections": 45
+  "platform": "medstoreapp",
+  "tenant_id": "clinic_042"
 }
 ```
 
-### 4.5 Metrics
-
-```http
-GET /metrics
-
-# Prometheus format
-db_gateway_queries_total{platform="medstoreapp"} 1234
-db_gateway_query_duration_seconds{platform="medstoreapp",quantile="0.99"} 0.05
-db_gateway_active_pools 15
-db_gateway_total_connections 45
-db_gateway_pool_hits{database="medstoreapp_clinic_001"} 500
-db_gateway_pool_misses{database="medstoreapp_clinic_001"} 10
+**Response (201):**
+```json
+{
+  "status": "created",
+  "database": "medstoreapp_clinic_042",
+  "message": "Database created. Run /register or /migrate to deploy schema."
+}
 ```
 
-## 5. Security
+## 4. Security
 
-### 5.1 Authentication
+### 4.1 IP Allowlist (No API Keys)
 
-Each platform gets its own API key:
+Since db-gateway is internal-only, security is via IP filtering:
+
+```rust
+fn is_allowed(ip: IpAddr) -> bool {
+    match ip {
+        // Localhost (dev)
+        IpAddr::V4(v4) if v4.is_loopback() => true,
+        IpAddr::V6(v6) if v6.is_loopback() => true,
+
+        // Azure VNet (prod): 10.0.1.0/24
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            octets[0] == 10 && octets[1] == 0 && octets[2] == 1
+        },
+
+        _ => false
+    }
+}
 ```
-API_KEY_MEDSTOREAPP=ms_xxxxxxxxxxxxx
-API_KEY_INSTITUTEAPP=ia_xxxxxxxxxxxxx
-API_KEY_ADMIN=admin_xxxxxxxxxxxxx
+
+### 4.2 Platform Isolation
+
+- Platforms can only access their own databases
+- Platform name extracted from request, validated against database prefix
+- Cannot query `instituteapp_*` databases with `platform: medstoreapp`
+
+## 5. Schema Management
+
+### 5.1 Migration Tracking
+
+Each database has a migrations table:
+
+```sql
+CREATE TABLE IF NOT EXISTS _db_gateway_migrations (
+    id SERIAL PRIMARY KEY,
+    migration_file TEXT NOT NULL UNIQUE,
+    checksum TEXT NOT NULL,
+    applied_at TIMESTAMPTZ DEFAULT NOW()
+);
 ```
 
-Middleware validates:
-1. X-API-Key header present
-2. Key matches platform in request body
-3. Admin endpoints require admin key
+### 5.2 Migration Execution
 
-### 5.2 Authorization
+```rust
+async fn run_migrations(&self, db: &str, migrations_dir: &Path) -> Result<usize> {
+    let mut applied = 0;
 
-- Platform APIs can only query their own databases
-- Cannot access other platform's databases
-- Admin key required for create/drop operations
+    // Get already applied migrations
+    let existing = self.get_applied_migrations(db).await?;
 
-### 5.3 SQL Injection Prevention
+    // Find .pssql files, sorted by name (001_, 002_, etc.)
+    let files = self.find_migration_files(migrations_dir)?;
 
-- All queries use parameterized execution
-- No string interpolation of user input
-- Query logging for audit
+    for file in files {
+        if !existing.contains(&file.name) {
+            // Run migration
+            let sql = fs::read_to_string(&file.path)?;
+            self.execute_sql(db, &sql).await?;
 
-### 5.4 Network Security
+            // Record it
+            self.record_migration(db, &file.name, &file.checksum).await?;
+            applied += 1;
+        }
+    }
 
-- Service binds to 127.0.0.1:9000 (localhost only)
-- Accessed via internal network (10.0.1.x)
-- No public internet exposure
+    Ok(applied)
+}
+```
+
+### 5.3 Function Deployment
+
+All functions use `CREATE OR REPLACE`, so they're always overwritten:
+
+```rust
+async fn deploy_functions(&self, db: &str, functions_dir: &Path) -> Result<usize> {
+    let files = self.find_pssql_files(functions_dir)?;
+
+    for file in &files {
+        let sql = fs::read_to_string(&file)?;
+        self.execute_sql(db, &sql).await?;
+    }
+
+    Ok(files.len())
+}
+```
 
 ## 6. Connection Pool Strategy
 
@@ -281,7 +357,7 @@ PoolConfig {
 
 ```
 MAX_TOTAL_CONNECTIONS = 200
-MAX_POOLS = 50  // Evict LRU if exceeded
+MAX_POOLS = 100  // Evict LRU if exceeded
 ```
 
 ### 6.3 Pool Lifecycle
@@ -289,58 +365,65 @@ MAX_POOLS = 50  // Evict LRU if exceeded
 1. **Lazy Creation**: Pool created on first query to database
 2. **LRU Eviction**: Pools unused for 30min are closed
 3. **Connection Recycling**: Connections recycled after 1 hour
-4. **Health Checks**: Periodic validation of idle connections
 
-## 7. Error Handling
+## 7. Project Structure
 
-### 7.1 Error Types
-
-```rust
-enum GatewayError {
-    DatabaseNotFound { platform: String, tenant_id: String },
-    ConnectionFailed { database: String, cause: String },
-    QueryFailed { query: String, cause: String },
-    Unauthorized { reason: String },
-    RateLimited { platform: String },
-    PoolExhausted { database: String },
-}
 ```
-
-### 7.2 Error Responses
-
-```json
-{
-  "error": "database_not_found",
-  "message": "Database medstoreapp_clinic_999 does not exist",
-  "platform": "medstoreapp",
-  "tenant_id": "clinic_999"
-}
+db-gateway/
+├── src/
+│   ├── main.rs              # Entry point
+│   ├── config.rs            # Environment config
+│   ├── error.rs             # Error types
+│   ├── api/
+│   │   ├── mod.rs
+│   │   ├── register.rs      # POST /register
+│   │   ├── migrate.rs       # POST /migrate
+│   │   ├── call.rs          # POST /call
+│   │   ├── admin.rs         # Admin endpoints
+│   │   └── health.rs        # GET /health
+│   ├── schema/
+│   │   ├── mod.rs
+│   │   ├── extractor.rs     # Unpack tar.gz
+│   │   ├── migration.rs     # Run migrations
+│   │   └── functions.rs     # Deploy functions
+│   ├── pool/
+│   │   ├── mod.rs
+│   │   ├── manager.rs       # Connection pool lifecycle
+│   │   └── router.rs        # Platform/tenant → database
+│   └── security/
+│       └── ip_filter.rs     # IP allowlist middleware
+├── Cargo.toml
+├── Dockerfile
+├── docker-compose.yaml
+├── .env.example
+└── README.md
 ```
 
 ## 8. Deployment
 
-### 8.1 Docker Configuration
+### 8.1 Docker
 
 ```dockerfile
-# Build stage
+# Build
 FROM rust:1.75-slim-bookworm AS builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release
 
-# Runtime stage
+# Runtime
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/db-gateway /usr/local/bin/
 EXPOSE 9000
+HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:9000/health || exit 1
 CMD ["db-gateway"]
 ```
 
-### 8.2 Systemd Service (Alternative)
+### 8.2 Systemd (Alternative)
 
 ```ini
 [Unit]
-Description=Database Gateway Service
+Description=Database Gateway
 After=postgresql.service
 
 [Service]
@@ -348,7 +431,7 @@ Type=simple
 User=dbgateway
 ExecStart=/usr/local/bin/db-gateway
 Restart=always
-Environment=DATABASE_URL=postgres://...
+EnvironmentFile=/etc/db-gateway/env
 
 [Install]
 WantedBy=multi-user.target
@@ -357,97 +440,123 @@ WantedBy=multi-user.target
 ### 8.3 Environment Variables
 
 ```bash
-# Database connection
+# PostgreSQL connection
 DATABASE_URL=postgres://gateway_user:password@localhost:5432/postgres
 
-# Server config
+# Server
 GATEWAY_HOST=127.0.0.1
 GATEWAY_PORT=9000
 
-# Pool config
+# Pool settings
 MAX_CONNECTIONS_PER_POOL=10
 MAX_TOTAL_CONNECTIONS=200
 POOL_IDLE_TIMEOUT_SECS=1800
 
-# API keys
-API_KEY_MEDSTOREAPP=ms_xxxxxxxxxxxxx
-API_KEY_INSTITUTEAPP=ia_xxxxxxxxxxxxx
-API_KEY_BTECHRECRUITER=br_xxxxxxxxxxxxx
-API_KEY_PROGALAXY=pg_xxxxxxxxxxxxx
-API_KEY_WEBMETEOR=wm_xxxxxxxxxxxxx
-API_KEY_AASAANWORK=aw_xxxxxxxxxxxxx
-API_KEY_RESTRANTAPP=ra_xxxxxxxxxxxxx
-API_KEY_LOGISTICSAPP=la_xxxxxxxxxxxxx
-API_KEY_ADMIN=admin_xxxxxxxxxxxxx
+# Security
+ALLOWED_NETWORKS=127.0.0.0/8,10.0.1.0/24
 
 # Logging
 RUST_LOG=info
 ```
 
-## 9. Monitoring
+## 9. StoneScriptPHP Integration
 
-### 9.1 Key Metrics
+### 9.1 New CLI Command
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `queries_total` | Counter | Total queries by platform |
-| `query_duration_seconds` | Histogram | Query latency |
-| `active_pools` | Gauge | Number of active connection pools |
-| `total_connections` | Gauge | Total PostgreSQL connections |
-| `pool_hits` | Counter | Requests served by existing pool |
-| `pool_misses` | Counter | Requests requiring new pool |
-| `errors_total` | Counter | Errors by type |
-
-### 9.2 Alerting Rules
-
-```yaml
-- alert: DbGatewayHighLatency
-  expr: histogram_quantile(0.99, db_gateway_query_duration_seconds) > 1
-  for: 5m
-
-- alert: DbGatewayConnectionsHigh
-  expr: db_gateway_total_connections > 180
-  for: 5m
-
-- alert: DbGatewayErrorRate
-  expr: rate(db_gateway_errors_total[5m]) > 0.1
-  for: 5m
+```bash
+php stone schema:export
+# Creates /tmp/postgresql.tar.gz from api/src/postgresql/
 ```
 
-## 10. Future Enhancements
+### 9.2 Container Entrypoint
 
-### Phase 2
-- Read replica routing (write to primary, read from replica)
-- Query caching (Redis integration)
-- Connection multiplexing
+```bash
+#!/bin/bash
+set -e
 
-### Phase 3
-- GraphQL support
-- Real-time subscriptions (LISTEN/NOTIFY)
-- Multi-region support
+# Export schema
+php stone schema:export
 
-## 11. Appendix
+# Register with gateway
+response=$(curl -s -X POST $DB_GATEWAY_URL/register \
+  -F "platform=$PLATFORM_ID" \
+  -F "tenant_id=$TENANT_ID" \
+  -F "schema=@/tmp/postgresql.tar.gz")
 
-### A. Supported Platforms
+status=$(echo $response | jq -r '.status')
+if [ "$status" != "ready" ]; then
+  echo "Gateway registration failed: $response"
+  exit 1
+fi
 
-| Platform | Main DB | Tenant Pattern |
-|----------|---------|----------------|
-| medstoreapp | medstoreapp_main | medstoreapp_{clinic_id} |
-| instituteapp | instituteapp_main | instituteapp_{school_id} |
-| btechrecruiter | btechrecruiter_main | btechrecruiter_{company_id} |
-| progalaxy | progalaxy_main | progalaxy_{institute_id} |
-| webmeteor | webmeteor_main | webmeteor_{customer_id} |
-| aasaanwork | aasaanwork_main | aasaanwork_{business_id} |
-| restrantapp | restrantapp_main | restrantapp_{restaurant_id} |
-| logisticsapp | logisticsapp_main | logisticsapp_{company_id} |
+echo "Schema deployed: $(echo $response | jq -r '.functions_deployed') functions"
 
-### B. PostgreSQL User Setup
-
-```sql
--- Gateway service user (can create databases)
-CREATE USER gateway_user WITH PASSWORD 'xxx' CREATEDB;
-
--- Grant connect to all databases
-GRANT CONNECT ON DATABASE postgres TO gateway_user;
-ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO gateway_user;
+# Start server
+exec php stone serve
 ```
+
+### 9.3 Database.php Changes
+
+```php
+// Instead of direct pg_connect, call gateway
+class Database {
+    private static string $gateway_url;
+    private static string $platform;
+    private static ?string $tenant_id;
+
+    public static function fn(string $function_name, array $params): array
+    {
+        $response = self::http_post(self::$gateway_url . '/call', [
+            'platform' => self::$platform,
+            'tenant_id' => self::$tenant_id,
+            'function' => $function_name,
+            'params' => $params
+        ]);
+
+        return $response['rows'];
+    }
+}
+```
+
+## 10. Database Naming Convention
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| Main DB | `{platform}_main` | `medstoreapp_main` |
+| Tenant DB | `{platform}_{tenant_id}` | `medstoreapp_clinic_001` |
+
+## 11. Error Handling
+
+### 11.1 Error Types
+
+```rust
+enum GatewayError {
+    DatabaseNotFound { platform: String, tenant_id: Option<String> },
+    MigrationFailed { database: String, migration: String, cause: String },
+    FunctionDeployFailed { database: String, function: String, cause: String },
+    QueryFailed { function: String, cause: String },
+    SchemaExtractionFailed { cause: String },
+    ConnectionFailed { database: String, cause: String },
+    PoolExhausted { database: String },
+    Unauthorized { ip: String },
+}
+```
+
+### 11.2 Error Responses
+
+```json
+{
+  "error": "migration_failed",
+  "message": "Migration 003_add_audit_log.pssql failed",
+  "database": "medstoreapp_clinic_001",
+  "cause": "relation 'audit_log' already exists"
+}
+```
+
+## 12. Future Enhancements
+
+- **Read replica routing**: Write to primary, read from replica
+- **Query caching**: Redis integration for frequent queries
+- **Metrics**: Prometheus endpoint for monitoring
+- **Backup coordination**: Trigger backups across tenant databases
+- **Schema versioning**: Track schema versions per platform

@@ -1,0 +1,54 @@
+# Project Information
+# Auto-generated for work-management integration
+
+name: db-gateway
+display_name: Database Gateway
+description: Rust-based multi-tenant database gateway/proxy for all platform APIs. Handles tenant routing, connection pooling, and database registry.
+
+# Project classification
+project_type: standalone
+project_purpose: internal-tool
+project_status: planning
+business_model: internal
+ownership: progalaxy
+domain: infrastructure
+
+# Technical details
+tech_stack:
+  - Rust
+  - Axum
+  - PostgreSQL
+  - Docker
+
+# Deployment
+deployment_tier: tier-2-database
+deployment_target: vm-postgres-primary
+
+# URLs (planned)
+urls:
+  production: null  # Internal service, no public URL
+  staging: null
+
+# Repository
+repository:
+  type: git
+  remote: null  # To be created
+
+# Dependencies
+depends_on:
+  - PostgreSQL 16 (vm-postgres-primary)
+
+# Consumers (platforms that will use this service)
+consumers:
+  - medstoreapp-platform
+  - instituteapp-platform
+  - btechrecruiter-platform
+  - progalaxy-platform
+  - webmeteor-platform
+  - aasaanwork-platform
+  - restrantapp-platform
+  - logisticsapp-platform
+
+# Metadata
+created_at: 2024-12-31
+created_by: orchestrator

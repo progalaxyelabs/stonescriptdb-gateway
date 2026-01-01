@@ -1,4 +1,4 @@
-# Database Gateway
+# StoneScript DB Gateway
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/progalaxyelabs/stonescriptdb-gateway)](https://github.com/progalaxyelabs/stonescriptdb-gateway/releases)
@@ -24,28 +24,28 @@ This service acts as a centralized database proxy and schema orchestrator for mu
 ```bash
 # Clone specific version
 git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
-cd db-gateway
+cd stonescriptdb-gateway
 git checkout v1.0.0
 
 # Install as systemd service
 sudo ./deploy/install.sh
 
 # Configure
-sudo nano /opt/db-gateway/.env
+sudo nano /opt/stonescriptdb-gateway/.env
 
 # Start
-sudo systemctl start db-gateway
+sudo systemctl start stonescriptdb-gateway
 ```
 
 ### Updating to Latest Release
 
 ```bash
-cd /path/to/db-gateway
+cd /path/to/stonescriptdb-gateway
 git fetch --tags
 git checkout v1.1.0  # or latest version
 cargo build --release
-sudo cp target/release/db-gateway /opt/db-gateway/
-sudo systemctl restart db-gateway
+sudo cp target/release/stonescriptdb-gateway /opt/stonescriptdb-gateway/
+sudo systemctl restart stonescriptdb-gateway
 ```
 
 ## How It Works
@@ -65,11 +65,11 @@ Platform API → POST /call → Gateway → PostgreSQL function → Response
 ## Architecture
 
 ```
-Platform Containers (Swarm)     DB Gateway (vm-postgres)
+Platform Containers              StoneScriptDB Gateway
 ┌──────────────────┐           ┌──────────────────┐
-│ medstoreapp-api  │──────────▶│                  │
-│ instituteapp-api │  /register│  Rust Service    │
-│ progalaxy-api    │  /call    │  (port 9000)     │
+│ platform-a-api   │──────────▶│                  │
+│ platform-b-api   │  /register│  Rust Service    │
+│ platform-c-api   │  /call    │  (port 9000)     │
 └──────────────────┘           └────────┬─────────┘
                                         │
                                         ▼
@@ -97,12 +97,42 @@ See [HLD.md](./HLD.md) for detailed architecture documentation.
 
 ## Development
 
-### Local Build
+### Building with Docker (Cross-platform)
+
+Use the provided Dockerfile to build a binary compatible with Ubuntu 22.04:
+
+```bash
+# Copy the example Dockerfile
+cp Dockerfile.build.example Dockerfile.build
+
+# Build the builder image
+docker build -f Dockerfile.build -t stonescriptdb-gateway-builder .
+
+# Build the binary
+mkdir -p output
+docker run --rm -v "$PWD/output:/output" stonescriptdb-gateway-builder
+
+# Binary output: ./output/stonescriptdb-gateway
+```
+
+### Deploy to Server
+
+```bash
+# Upload binary
+scp output/stonescriptdb-gateway user@server:/tmp/
+
+# Install on server
+ssh user@server
+sudo cp /tmp/stonescriptdb-gateway /opt/stonescriptdb-gateway/
+sudo systemctl restart stonescriptdb-gateway
+```
+
+### Local Development (requires Rust installed)
 
 ```bash
 # Clone
 git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
-cd db-gateway
+cd stonescriptdb-gateway
 
 # Setup
 cargo build
@@ -126,16 +156,16 @@ cargo build --release
 sudo ./deploy/install.sh
 
 # Configure
-sudo nano /opt/db-gateway/.env
+sudo nano /opt/stonescriptdb-gateway/.env
 
 # Start service
-sudo systemctl start db-gateway
+sudo systemctl start stonescriptdb-gateway
 
 # Check status
-sudo systemctl status db-gateway
+sudo systemctl status stonescriptdb-gateway
 
 # View logs
-sudo journalctl -u db-gateway -f
+sudo journalctl -u stonescriptdb-gateway -f
 ```
 
 See `deploy/` directory for installation scripts and systemd service file.

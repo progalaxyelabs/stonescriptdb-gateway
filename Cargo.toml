@@ -1,13 +1,13 @@
 [package]
-name = "db-gateway"
+name = "stonescriptdb-gateway"
 version = "0.1.0"
 edition = "2021"
-description = "Multi-tenant PostgreSQL database gateway and schema orchestrator"
+description = "Multi-tenant PostgreSQL database gateway and schema orchestrator for StoneScript platforms"
 authors = ["Progalaxy E-Labs"]
 license = "MIT"
 
 [[bin]]
-name = "db-gateway"
+name = "stonescriptdb-gateway"
 path = "src/main.rs"
 
 [dependencies]
@@ -35,6 +35,7 @@ serde_json = "1"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
 
 # Environment
 dotenvy = "0.15"

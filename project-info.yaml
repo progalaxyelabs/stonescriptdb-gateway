@@ -1,8 +1,8 @@
 # Project Information
 # Auto-generated for work-management integration
 
-name: db-gateway
-display_name: Database Gateway
+name: stonescriptdb-gateway
+display_name: StoneScript DB Gateway
 description: Rust-based multi-tenant database gateway and schema orchestrator. Receives postgresql folder from platforms, runs migrations, deploys functions, routes queries to correct tenant database. Designed for PostgreSQL function-based platforms like StoneScriptPHP.
 
 # Project classification
@@ -32,7 +32,7 @@ urls:
 # Repository
 repository:
   type: git
-  remote: null  # To be created
+  remote: git@github.com:progalaxyelabs/stonescriptdb-gateway.git
 
 # Dependencies
 depends_on:

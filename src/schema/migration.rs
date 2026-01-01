@@ -28,7 +28,7 @@ impl MigrationRunner {
         client
             .execute(
                 r#"
-                CREATE TABLE IF NOT EXISTS _db_gateway_migrations (
+                CREATE TABLE IF NOT EXISTS _stonescriptdb_gateway_migrations (
                     id SERIAL PRIMARY KEY,
                     migration_file TEXT NOT NULL UNIQUE,
                     checksum TEXT NOT NULL,
@@ -40,7 +40,7 @@ impl MigrationRunner {
             .await
             .map_err(|e| GatewayError::MigrationFailed {
                 database: database.to_string(),
-                migration: "_db_gateway_migrations table creation".to_string(),
+                migration: "_stonescriptdb_gateway_migrations table creation".to_string(),
                 cause: e.to_string(),
             })?;
 
@@ -55,7 +55,7 @@ impl MigrationRunner {
 
         let rows = client
             .query(
-                "SELECT migration_file FROM _db_gateway_migrations ORDER BY id",
+                "SELECT migration_file FROM _stonescriptdb_gateway_migrations ORDER BY id",
                 &[],
             )
             .await
@@ -181,7 +181,7 @@ impl MigrationRunner {
             // Record the migration
             client
                 .execute(
-                    "INSERT INTO _db_gateway_migrations (migration_file, checksum) VALUES ($1, $2)",
+                    "INSERT INTO _stonescriptdb_gateway_migrations (migration_file, checksum) VALUES ($1, $2)",
                     &[&migration.name, &migration.checksum],
                 )
                 .await
@@ -215,7 +215,7 @@ impl MigrationRunner {
 
         let row = client
             .query_opt(
-                "SELECT checksum FROM _db_gateway_migrations WHERE migration_file = $1",
+                "SELECT checksum FROM _stonescriptdb_gateway_migrations WHERE migration_file = $1",
                 &[&migration_name],
             )
             .await

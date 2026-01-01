@@ -1,0 +1,38 @@
+# Build Dockerfile for stonescriptdb-gateway
+# Builds on Ubuntu 22.04 to match Azure Swarm Manager (glibc 2.35)
+#
+# Usage:
+#   docker build -f Dockerfile.build -t stonescriptdb-gateway-builder .
+#   docker run --rm -v "$PWD/output:/output" stonescriptdb-gateway-builder
+#
+# Output: ./output/stonescriptdb-gateway
+
+FROM ubuntu:22.04 AS builder
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Set working directory
+WORKDIR /app
+
+# Copy source code
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+# Build release binary
+RUN cargo build --release
+
+# Default command: copy binary to /output volume
+CMD ["cp", "/app/target/release/stonescriptdb-gateway", "/output/"]

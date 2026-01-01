@@ -1,4 +1,4 @@
-# Database Gateway - High Level Design
+# StoneScript DB Gateway - High Level Design
 
 ## 1. Overview
 
@@ -253,7 +253,7 @@ Create a new tenant database.
 
 ### 4.1 IP Allowlist (No API Keys)
 
-Since db-gateway is internal-only, security is via IP filtering:
+Since stonescriptdb-gateway is internal-only, security is via IP filtering:
 
 ```rust
 fn is_allowed(ip: IpAddr) -> bool {
@@ -286,7 +286,7 @@ fn is_allowed(ip: IpAddr) -> bool {
 Each database has a migrations table:
 
 ```sql
-CREATE TABLE IF NOT EXISTS _db_gateway_migrations (
+CREATE TABLE IF NOT EXISTS _stonescriptdb_gateway_migrations (
     id SERIAL PRIMARY KEY,
     migration_file TEXT NOT NULL UNIQUE,
     checksum TEXT NOT NULL,
@@ -369,7 +369,7 @@ MAX_POOLS = 100  // Evict LRU if exceeded
 ## 7. Project Structure
 
 ```
-db-gateway/
+stonescriptdb-gateway/
 ├── src/
 │   ├── main.rs              # Entry point
 │   ├── config.rs            # Environment config
@@ -413,25 +413,25 @@ RUN cargo build --release
 # Runtime
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/db-gateway /usr/local/bin/
+COPY --from=builder /app/target/release/stonescriptdb-gateway /usr/local/bin/
 EXPOSE 9000
 HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:9000/health || exit 1
-CMD ["db-gateway"]
+CMD ["stonescriptdb-gateway"]
 ```
 
 ### 8.2 Systemd (Alternative)
 
 ```ini
 [Unit]
-Description=Database Gateway
+Description=StoneScriptDB Gateway
 After=postgresql.service
 
 [Service]
 Type=simple
-User=dbgateway
-ExecStart=/usr/local/bin/db-gateway
+User=stonescriptdb-gateway
+ExecStart=/usr/local/bin/stonescriptdb-gateway
 Restart=always
-EnvironmentFile=/etc/db-gateway/env
+EnvironmentFile=/etc/stonescriptdb-gateway/env
 
 [Install]
 WantedBy=multi-user.target

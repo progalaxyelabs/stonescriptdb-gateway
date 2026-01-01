@@ -2,6 +2,10 @@
 /target/
 Cargo.lock
 
+# Build
+/output/
+Dockerfile.local
+
 # Environment
 .env
 .env.local

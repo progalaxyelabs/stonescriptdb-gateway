@@ -23,19 +23,44 @@ use std::time::Instant;
 use tokio::signal;
 use tokio::time::{interval, Duration};
 use tower_http::trace::TraceLayer;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging
+    // Setup log directory
+    let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| "/var/log/stonescriptdb-gateway".to_string());
+
+    // Create log directory if it doesn't exist
+    std::fs::create_dir_all(&log_dir).unwrap_or_else(|e| {
+        eprintln!("Warning: Could not create log directory {}: {}", log_dir, e);
+    });
+
+    // Create file appender with daily rotation
+    let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "stonescriptdb-gateway.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // Initialize logging - both stdout and file
     tracing_subscriber::registry()
-        .with(fmt::layer())
         .with(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,db_gateway=debug")),
+                .unwrap_or_else(|_| EnvFilter::new("debug,stonescriptdb_gateway=trace")),
+        )
+        // Console output
+        .with(fmt::layer().with_target(true).with_thread_ids(true))
+        // File output with JSON format for easy parsing
+        .with(
+            fmt::layer()
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_ansi(false)
+                .json()
+                .with_writer(non_blocking),
         )
         .init();
+
+    debug!("Logging initialized - log directory: {}", log_dir);
 
     // Load environment from .env file if present
     if let Err(e) = dotenvy::dotenv() {

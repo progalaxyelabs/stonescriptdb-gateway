@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# Register Platform with DB Gateway
+# Register Platform with StoneScriptDB Gateway
 # =============================================================================
-# Creates a timestamped tar.gz of postgresql folder, sends to db-gateway,
+# Creates a timestamped tar.gz of postgresql folder, sends to stonescriptdb-gateway,
 # then cleans up.
 #
 # Usage:
@@ -73,7 +73,7 @@ cleanup() {
 # Trap to ensure cleanup on exit (success or failure)
 trap cleanup EXIT
 
-echo -e "${GREEN}=== DB Gateway Registration ===${NC}"
+echo -e "${GREEN}=== StoneScriptDB Gateway Registration ===${NC}"
 echo "Platform: $PLATFORM_ID"
 echo "Tenant: ${TENANT_ID:-<main>}"
 echo "Gateway: $DB_GATEWAY_URL"

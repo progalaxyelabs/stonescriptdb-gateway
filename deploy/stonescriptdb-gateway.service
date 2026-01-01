@@ -1,0 +1,45 @@
+[Unit]
+Description=StoneScriptDB Gateway - Multi-tenant PostgreSQL Proxy
+Documentation=https://bitbucket.org/progalaxyelabs/stonescriptdb-gateway
+After=network.target postgresql.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=stonescriptdb-gateway
+Group=stonescriptdb-gateway
+WorkingDirectory=/opt/stonescriptdb-gateway
+
+# Main executable
+ExecStart=/opt/stonescriptdb-gateway/stonescriptdb-gateway
+
+# Environment file
+EnvironmentFile=/opt/stonescriptdb-gateway/.env
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/opt/stonescriptdb-gateway/schemas /opt/stonescriptdb-gateway/logs /var/log/stonescriptdb-gateway
+ReadOnlyPaths=/opt/stonescriptdb-gateway
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stonescriptdb-gateway
+
+[Install]
+WantedBy=multi-user.target

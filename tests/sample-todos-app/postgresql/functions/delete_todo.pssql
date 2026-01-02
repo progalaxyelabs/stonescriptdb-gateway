@@ -1,0 +1,16 @@
+CREATE OR REPLACE FUNCTION delete_todo(
+    p_todo_id INT,
+    p_user_id INT
+)
+RETURNS INT AS $$
+DECLARE
+    v_rows_affected INT;
+BEGIN
+    DELETE FROM todos
+    WHERE todo_id = p_todo_id
+      AND user_id = p_user_id;
+
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+    RETURN v_rows_affected;
+END;
+$$ LANGUAGE plpgsql;

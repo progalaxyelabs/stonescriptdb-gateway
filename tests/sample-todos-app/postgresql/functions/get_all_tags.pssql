@@ -1,0 +1,16 @@
+CREATE OR REPLACE FUNCTION get_all_tags()
+RETURNS TABLE (
+    tag_id INT,
+    name TEXT,
+    color TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        t.tag_id,
+        t.name::TEXT,
+        t.color::TEXT
+    FROM tags t
+    ORDER BY t.name;
+END;
+$$ LANGUAGE plpgsql;

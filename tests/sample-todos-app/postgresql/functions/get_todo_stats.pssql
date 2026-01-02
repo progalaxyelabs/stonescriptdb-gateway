@@ -1,0 +1,22 @@
+CREATE OR REPLACE FUNCTION get_todo_stats(
+    p_user_id INT
+)
+RETURNS TABLE (
+    total_todos INT,
+    completed_todos INT,
+    pending_todos INT,
+    overdue_todos INT,
+    due_today INT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        COUNT(*)::INT AS total_todos,
+        COUNT(*) FILTER (WHERE is_completed)::INT AS completed_todos,
+        COUNT(*) FILTER (WHERE NOT is_completed)::INT AS pending_todos,
+        COUNT(*) FILTER (WHERE NOT is_completed AND due_date < CURRENT_DATE)::INT AS overdue_todos,
+        COUNT(*) FILTER (WHERE NOT is_completed AND due_date = CURRENT_DATE)::INT AS due_today
+    FROM todos
+    WHERE user_id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;

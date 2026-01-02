@@ -4,9 +4,13 @@ use serde::Serialize;
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Version from Cargo.toml
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     status: String,
+    version: &'static str,
     postgres_connected: bool,
     active_pools: usize,
     total_connections: u32,
@@ -25,6 +29,7 @@ pub async fn health_check(
         } else {
             "degraded".to_string()
         },
+        version: VERSION,
         postgres_connected,
         active_pools: pool_manager.active_pools(),
         total_connections: pool_manager.total_connections(),

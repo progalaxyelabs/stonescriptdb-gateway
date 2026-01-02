@@ -31,8 +31,22 @@ pub enum GatewayError {
         cause: String,
     },
 
-    #[error("Query failed for function {function}: {cause}")]
-    QueryFailed { function: String, cause: String },
+    #[error("Query failed for {function} in {database}: {cause}")]
+    QueryFailed {
+        database: String,
+        function: String,
+        cause: String,
+    },
+
+    #[error("Extension {extension} not available: {cause}")]
+    ExtensionNotAvailable { extension: String, cause: String },
+
+    #[error("Extension installation failed in {database}: {extension} - {cause}")]
+    ExtensionInstallFailed {
+        database: String,
+        extension: String,
+        cause: String,
+    },
 
     #[error("Schema extraction failed: {cause}")]
     SchemaExtractionFailed { cause: String },
@@ -119,12 +133,30 @@ impl IntoResponse for GatewayError {
                     cause: Some(cause.clone()),
                 },
             ),
-            GatewayError::QueryFailed { function, cause } => (
+            GatewayError::QueryFailed { database, function, cause } => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 ErrorResponse {
                     error: "query_failed".to_string(),
                     message: format!("Query for function '{}' failed", function),
+                    database: Some(database.clone()),
+                    cause: Some(cause.clone()),
+                },
+            ),
+            GatewayError::ExtensionNotAvailable { extension, cause } => (
+                StatusCode::BAD_REQUEST,
+                ErrorResponse {
+                    error: "extension_not_available".to_string(),
+                    message: format!("PostgreSQL extension '{}' is not available on this server", extension),
                     database: None,
+                    cause: Some(cause.clone()),
+                },
+            ),
+            GatewayError::ExtensionInstallFailed { database, extension, cause } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorResponse {
+                    error: "extension_install_failed".to_string(),
+                    message: format!("Failed to install extension '{}'", extension),
+                    database: Some(database.clone()),
                     cause: Some(cause.clone()),
                 },
             ),

@@ -18,8 +18,21 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
-        let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://gateway_user:password@localhost:5432/postgres".to_string());
+        // Build database_url from individual fields or use DATABASE_URL if provided
+        let database_url = if let Ok(url) = env::var("DATABASE_URL") {
+            url
+        } else {
+            let db_host = env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
+            let db_port = env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
+            let db_name = env::var("DB_NAME").unwrap_or_else(|_| "postgres".to_string());
+            let db_user = env::var("DB_USER").unwrap_or_else(|_| "gateway_user".to_string());
+            let db_password = env::var("DB_PASSWORD").unwrap_or_else(|_| "password".to_string());
+
+            // URL-encode password to handle special characters
+            let encoded_password = urlencoding::encode(&db_password);
+
+            format!("postgres://{}:{}@{}:{}/{}", db_user, encoded_password, db_host, db_port, db_name)
+        };
 
         let gateway_host = env::var("GATEWAY_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
 

@@ -1,0 +1,40 @@
+CREATE OR REPLACE FUNCTION get_todo_by_id(
+    p_todo_id INT,
+    p_user_id INT
+)
+RETURNS TABLE (
+    todo_id INT,
+    user_id INT,
+    title TEXT,
+    description TEXT,
+    is_completed BOOLEAN,
+    priority INT,
+    due_date DATE,
+    created_on TIMESTAMPTZ,
+    updated_on TIMESTAMPTZ,
+    tags JSON
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        t.todo_id,
+        t.user_id,
+        t.title::TEXT,
+        t.description::TEXT,
+        t.is_completed,
+        t.priority,
+        t.due_date,
+        t.created_on,
+        t.updated_on,
+        COALESCE(
+            (SELECT json_agg(json_build_object('tag_id', tg.tag_id, 'name', tg.name, 'color', tg.color))
+             FROM todo_tags tt
+             JOIN tags tg ON tg.tag_id = tt.tag_id
+             WHERE tt.todo_id = t.todo_id),
+            '[]'::json
+        ) AS tags
+    FROM todos t
+    WHERE t.todo_id = p_todo_id
+      AND t.user_id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;

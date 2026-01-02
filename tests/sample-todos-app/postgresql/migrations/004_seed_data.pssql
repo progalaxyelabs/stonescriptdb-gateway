@@ -1,0 +1,43 @@
+-- Seeder: Initial test data for todos app
+
+-- Insert test users
+INSERT INTO users (email, display_name, password_hash) VALUES
+    ('john@example.com', 'John Doe', 'hash_placeholder_1'),
+    ('jane@example.com', 'Jane Smith', 'hash_placeholder_2'),
+    ('bob@example.com', 'Bob Wilson', 'hash_placeholder_3')
+ON CONFLICT (email) DO NOTHING;
+
+-- Insert tags
+INSERT INTO tags (name, color) VALUES
+    ('work', '#EF4444'),
+    ('personal', '#3B82F6'),
+    ('urgent', '#F59E0B'),
+    ('shopping', '#10B981'),
+    ('health', '#8B5CF6')
+ON CONFLICT (name) DO NOTHING;
+
+-- Insert sample todos for John (user_id = 1)
+INSERT INTO todos (user_id, title, description, priority, is_completed, due_date) VALUES
+    (1, 'Complete project proposal', 'Write the Q1 project proposal for the new feature', 1, false, CURRENT_DATE + INTERVAL '3 days'),
+    (1, 'Review pull requests', 'Review pending PRs from the team', 2, false, CURRENT_DATE + INTERVAL '1 day'),
+    (1, 'Buy groceries', 'Milk, eggs, bread, vegetables', 4, false, CURRENT_DATE),
+    (1, 'Schedule dentist appointment', 'Annual checkup', 3, true, CURRENT_DATE - INTERVAL '5 days'),
+    (1, 'Prepare presentation', 'Slides for Monday meeting', 2, false, CURRENT_DATE + INTERVAL '5 days');
+
+-- Insert sample todos for Jane (user_id = 2)
+INSERT INTO todos (user_id, title, description, priority, is_completed, due_date) VALUES
+    (2, 'Update documentation', 'Update API docs with new endpoints', 2, false, CURRENT_DATE + INTERVAL '7 days'),
+    (2, 'Fix login bug', 'Users reporting session timeout issues', 1, false, CURRENT_DATE),
+    (2, 'Team standup notes', 'Prepare notes from today standup', 5, true, CURRENT_DATE);
+
+-- Assign tags to todos
+INSERT INTO todo_tags (todo_id, tag_id) VALUES
+    (1, 1),  -- Complete project proposal -> work
+    (1, 3),  -- Complete project proposal -> urgent
+    (2, 1),  -- Review pull requests -> work
+    (3, 4),  -- Buy groceries -> shopping
+    (4, 5),  -- Schedule dentist -> health
+    (5, 1),  -- Prepare presentation -> work
+    (6, 1),  -- Update documentation -> work
+    (7, 1),  -- Fix login bug -> work
+    (7, 3);  -- Fix login bug -> urgent

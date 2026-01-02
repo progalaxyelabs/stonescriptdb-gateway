@@ -1,7 +1,25 @@
+mod changelog;
+mod custom_types;
+mod dependency;
+mod diff;
+mod extensions;
 mod extractor;
 mod functions;
 mod migration;
+mod seeder;
+mod tables;
+mod types;
+mod verifier;
 
+pub use changelog::{ChangelogManager, ChangelogEntry, ChangelogRecord, ChangeType as ChangelogChangeType};
+pub use custom_types::CustomTypeManager;
+pub use dependency::{DependencyAnalyzer, DependencyAnalysis, TableInfo, ForeignKeyDependency};
+pub use diff::{SchemaDiffChecker, SchemaDiff, SchemaChange, ChangeType, ChangeCompatibility, ColumnSchema, TableSchema};
+pub use extensions::ExtensionManager;
 pub use extractor::SchemaExtractor;
 pub use functions::FunctionDeployer;
 pub use migration::MigrationRunner;
+pub use seeder::{SeederRunner, SeederResult, SeederValidation};
+pub use tables::{TableDeployer, TableDefinition, TableDeployResult};
+pub use types::{TypeChecker, TypeCompatibility};
+pub use verifier::{SchemaVerifier, VerificationResult};

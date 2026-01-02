@@ -1,0 +1,25 @@
+CREATE OR REPLACE FUNCTION add_tag_to_todo(
+    p_todo_id INT,
+    p_user_id INT,
+    p_tag_id INT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_todo_exists BOOLEAN;
+BEGIN
+    -- Verify todo belongs to user
+    SELECT EXISTS(
+        SELECT 1 FROM todos WHERE todo_id = p_todo_id AND user_id = p_user_id
+    ) INTO v_todo_exists;
+
+    IF NOT v_todo_exists THEN
+        RETURN FALSE;
+    END IF;
+
+    INSERT INTO todo_tags (todo_id, tag_id)
+    VALUES (p_todo_id, p_tag_id)
+    ON CONFLICT DO NOTHING;
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;

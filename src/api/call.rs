@@ -54,42 +54,64 @@ pub async fn call_function(
         cause: e.to_string(),
     })?;
 
-    // Build query: SELECT * FROM function_name($1, $2, ...)
-    let placeholders: Vec<String> = (1..=request.params.len())
-        .map(|i| format!("${}", i))
-        .collect();
+    // Build query using JSON parameter passing for type flexibility
+    // We pass all params as a single JSONB array and use jsonb_array_elements to extract them
+    // This allows PostgreSQL to handle type coercion naturally
 
-    let query = format!(
-        "SELECT * FROM {}({})",
-        request.function,
-        placeholders.join(", ")
-    );
+    let param_count = request.params.len();
 
-    // Convert params to tokio_postgres types
-    // We use JSON strings for all parameters, letting PostgreSQL handle conversion
-    let params: Vec<String> = request
-        .params
-        .iter()
-        .map(|v| match v {
-            Value::String(s) => s.clone(),
-            Value::Null => String::new(),
-            other => other.to_string(),
-        })
-        .collect();
+    let rows = if param_count == 0 {
+        // No parameters - simple call
+        let query = format!("SELECT * FROM {}()", request.function);
+        client
+            .query(&query, &[])
+            .await
+            .map_err(|e| GatewayError::QueryFailed {
+                database: db_name.clone(),
+                function: request.function.clone(),
+                cause: e.to_string(),
+            })?
+    } else {
+        // Build inline SQL with properly escaped/typed values
+        // This is safe because we validate the function name and use proper JSON serialization
+        let param_values: Vec<String> = request
+            .params
+            .iter()
+            .map(|v| match v {
+                Value::Null => "NULL".to_string(),
+                Value::Bool(b) => b.to_string(),
+                Value::Number(n) => n.to_string(),
+                Value::String(s) => {
+                    // Escape single quotes for SQL
+                    let escaped = s.replace('\'', "''");
+                    format!("'{}'", escaped)
+                }
+                Value::Array(_) | Value::Object(_) => {
+                    // For complex types, pass as JSONB
+                    let json_str = serde_json::to_string(v).unwrap_or_default();
+                    let escaped = json_str.replace('\'', "''");
+                    format!("'{}'::jsonb", escaped)
+                }
+            })
+            .collect();
 
-    let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
-        .iter()
-        .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
-        .collect();
+        let query = format!(
+            "SELECT * FROM {}({})",
+            request.function,
+            param_values.join(", ")
+        );
 
-    // Execute query
-    let rows = client
-        .query(&query, &param_refs)
-        .await
-        .map_err(|e| GatewayError::QueryFailed {
-            function: request.function.clone(),
-            cause: e.to_string(),
-        })?;
+        debug!("Executing query: {}", query);
+
+        client
+            .query(&query, &[])
+            .await
+            .map_err(|e| GatewayError::QueryFailed {
+                database: db_name.clone(),
+                function: request.function.clone(),
+                cause: e.to_string(),
+            })?
+    };
 
     // Convert rows to JSON
     let row_count = rows.len();

@@ -1,6 +1,6 @@
 [package]
 name = "stonescriptdb-gateway"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "Multi-tenant PostgreSQL database gateway and schema orchestrator for StoneScript platforms"
 authors = ["Progalaxy E-Labs"]
@@ -9,6 +9,18 @@ license = "MIT"
 [[bin]]
 name = "stonescriptdb-gateway"
 path = "src/main.rs"
+
+[[bin]]
+name = "analyze-deps"
+path = "src/bin/analyze-deps.rs"
+
+[[bin]]
+name = "type-matrix"
+path = "src/bin/type-matrix.rs"
+
+[lib]
+name = "stonescriptdb_gateway"
+path = "src/lib.rs"
 
 [dependencies]
 # Async runtime
@@ -58,8 +70,14 @@ chrono = { version = "0.4", features = ["serde"] }
 # IP address parsing
 ipnetwork = "0.20"
 
+# URL encoding
+urlencoding = "2"
+
 # Temp file handling
 tempfile = "3"
+
+# SQL parsing
+regex = "1"
 
 [dev-dependencies]
 tokio-test = "0.4"

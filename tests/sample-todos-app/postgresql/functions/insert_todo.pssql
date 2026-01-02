@@ -1,0 +1,18 @@
+CREATE OR REPLACE FUNCTION insert_todo(
+    p_user_id INT,
+    p_title VARCHAR(500),
+    p_description TEXT DEFAULT NULL,
+    p_priority INT DEFAULT 3,
+    p_due_date DATE DEFAULT NULL
+)
+RETURNS INT AS $$
+DECLARE
+    v_todo_id INT;
+BEGIN
+    INSERT INTO todos (user_id, title, description, priority, due_date)
+    VALUES (p_user_id, p_title, p_description, p_priority, p_due_date)
+    RETURNING todo_id INTO v_todo_id;
+
+    RETURN v_todo_id;
+END;
+$$ LANGUAGE plpgsql;

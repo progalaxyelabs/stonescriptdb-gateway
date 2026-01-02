@@ -56,6 +56,14 @@ impl SchemaExtractor {
         self.find_postgresql_subdir("seeders")
     }
 
+    pub fn extensions_dir(&self) -> PathBuf {
+        self.find_postgresql_subdir("extensions")
+    }
+
+    pub fn types_dir(&self) -> PathBuf {
+        self.find_postgresql_subdir("types")
+    }
+
     fn find_postgresql_subdir(&self, subdir: &str) -> PathBuf {
         // First try: direct postgresql/<subdir>
         let direct = self.extracted_path.join("postgresql").join(subdir);

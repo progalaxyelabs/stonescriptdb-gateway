@@ -1,0 +1,20 @@
+CREATE OR REPLACE FUNCTION get_user_by_id(
+    p_user_id INT
+)
+RETURNS TABLE (
+    user_id INT,
+    email TEXT,
+    display_name TEXT,
+    created_on TIMESTAMPTZ
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        u.user_id,
+        u.email::TEXT,
+        u.display_name::TEXT,
+        u.created_on
+    FROM users u
+    WHERE u.user_id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;

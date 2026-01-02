@@ -1,4 +1,5 @@
 use crate::error::{GatewayError, Result};
+use crate::schema::DependencyAnalyzer;
 use deadpool_postgres::Pool;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -12,11 +13,127 @@ pub struct MigrationFile {
     pub checksum: String,
 }
 
+/// Result of dependency validation
+#[derive(Debug, Clone)]
+pub struct DependencyValidation {
+    pub is_valid: bool,
+    pub issues: Vec<DependencyIssue>,
+    pub suggested_order: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DependencyIssue {
+    pub migration: String,
+    pub table: String,
+    pub depends_on: String,
+    pub depends_on_defined_in: Option<String>,
+    pub message: String,
+}
+
 pub struct MigrationRunner;
 
 impl MigrationRunner {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Validate that migrations are in correct dependency order
+    pub fn validate_dependencies(&self, migrations_dir: &Path) -> Result<DependencyValidation> {
+        let migration_files = self.find_migration_files(migrations_dir)?;
+
+        if migration_files.is_empty() {
+            return Ok(DependencyValidation {
+                is_valid: true,
+                issues: Vec::new(),
+                suggested_order: Vec::new(),
+            });
+        }
+
+        // Concatenate all SQL to analyze dependencies
+        let mut all_sql = String::new();
+        let mut table_to_migration: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+        for migration in &migration_files {
+            let content = fs::read_to_string(&migration.path).map_err(|e| {
+                GatewayError::SchemaExtractionFailed {
+                    cause: format!("Failed to read migration file {:?}: {}", migration.path, e),
+                }
+            })?;
+            all_sql.push_str(&content);
+            all_sql.push('\n');
+
+            // Track which migration defines which tables
+            if let Ok(analysis) = DependencyAnalyzer::analyze_sql(&content) {
+                for table in &analysis.tables {
+                    table_to_migration.insert(table.name.clone(), migration.name.clone());
+                }
+            }
+        }
+
+        // Analyze full schema
+        let analysis = DependencyAnalyzer::analyze_sql(&all_sql)
+            .map_err(|e| GatewayError::SchemaExtractionFailed { cause: e })?;
+
+        let mut issues = Vec::new();
+
+        // Check each migration's tables against their dependencies
+        for (i, migration) in migration_files.iter().enumerate() {
+            let content = fs::read_to_string(&migration.path).unwrap_or_default();
+            if let Ok(migration_analysis) = DependencyAnalyzer::analyze_sql(&content) {
+                for table in &migration_analysis.tables {
+                    for dep in &table.depends_on {
+                        // Find which migration defines the dependency
+                        if let Some(dep_migration) = table_to_migration.get(dep) {
+                            // Find index of dependency migration
+                            let dep_index = migration_files.iter().position(|m| &m.name == dep_migration);
+
+                            if let Some(dep_idx) = dep_index {
+                                if dep_idx > i {
+                                    // Dependency is defined AFTER this migration - problem!
+                                    issues.push(DependencyIssue {
+                                        migration: migration.name.clone(),
+                                        table: table.name.clone(),
+                                        depends_on: dep.clone(),
+                                        depends_on_defined_in: Some(dep_migration.clone()),
+                                        message: format!(
+                                            "Table '{}' in '{}' references '{}' which is defined later in '{}'",
+                                            table.name, migration.name, dep, dep_migration
+                                        ),
+                                    });
+                                }
+                            }
+                        } else {
+                            // Dependency table not found in any migration (might be external)
+                            debug!(
+                                "Table '{}' references '{}' which is not defined in migrations (may be external)",
+                                table.name, dep
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let is_valid = issues.is_empty();
+
+        // Get suggested order from topological sort
+        let suggested_order = analysis.creation_order.clone();
+
+        if !is_valid {
+            warn!(
+                "Dependency validation found {} issues in migrations",
+                issues.len()
+            );
+            for issue in &issues {
+                warn!("  - {}", issue.message);
+            }
+        }
+
+        Ok(DependencyValidation {
+            is_valid,
+            issues,
+            suggested_order,
+        })
     }
 
     pub async fn ensure_migrations_table(&self, pool: &Pool, database: &str) -> Result<()> {
@@ -114,10 +231,162 @@ impl MigrationRunner {
             }
         }
 
-        // Sort by filename (which should have numeric prefixes like 001_, 002_, etc.)
+        // Sort alphabetically by default (will be reordered by dependencies if needed)
         migrations.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(migrations)
+    }
+
+    /// Reorder migrations based on table dependencies
+    /// Returns migrations in the order they should be executed
+    pub fn order_by_dependencies(&self, migrations: Vec<MigrationFile>) -> Result<Vec<MigrationFile>> {
+        if migrations.is_empty() {
+            return Ok(migrations);
+        }
+
+        // Build a map of table -> migration that defines it
+        let mut table_to_migration: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut migration_tables: Vec<Vec<String>> = Vec::new(); // Tables defined in each migration
+        let mut migration_deps: Vec<std::collections::HashSet<String>> = Vec::new(); // Dependencies for each migration
+
+        for (i, migration) in migrations.iter().enumerate() {
+            let content = fs::read_to_string(&migration.path).unwrap_or_default();
+
+            let mut tables = Vec::new();
+            let mut deps = std::collections::HashSet::new();
+
+            if let Ok(analysis) = DependencyAnalyzer::analyze_sql(&content) {
+                for table in &analysis.tables {
+                    table_to_migration.insert(table.name.clone(), i);
+                    tables.push(table.name.clone());
+
+                    for dep in &table.depends_on {
+                        deps.insert(dep.clone());
+                    }
+                }
+            }
+
+            migration_tables.push(tables);
+            migration_deps.push(deps);
+        }
+
+        // Build migration dependency graph (migration index -> migration indices it depends on)
+        let mut migration_graph: Vec<std::collections::HashSet<usize>> = vec![std::collections::HashSet::new(); migrations.len()];
+
+        for (i, deps) in migration_deps.iter().enumerate() {
+            for dep_table in deps {
+                if let Some(&dep_migration_idx) = table_to_migration.get(dep_table) {
+                    if dep_migration_idx != i {
+                        migration_graph[i].insert(dep_migration_idx);
+                    }
+                }
+            }
+        }
+
+        // Topological sort of migrations
+        let mut in_degree: Vec<usize> = vec![0; migrations.len()];
+        for deps in &migration_graph {
+            for &dep in deps {
+                in_degree[dep] += 0; // Just to ensure we touch each
+            }
+        }
+        for (i, deps) in migration_graph.iter().enumerate() {
+            in_degree[i] = deps.len();
+        }
+
+        // Reverse the graph for Kahn's algorithm
+        let mut reverse_graph: Vec<Vec<usize>> = vec![Vec::new(); migrations.len()];
+        for (i, deps) in migration_graph.iter().enumerate() {
+            for &dep in deps {
+                reverse_graph[dep].push(i);
+            }
+        }
+
+        // Kahn's algorithm
+        let mut queue: Vec<usize> = in_degree
+            .iter()
+            .enumerate()
+            .filter(|(_, &deg)| deg == 0)
+            .map(|(i, _)| i)
+            .collect();
+        queue.sort_by(|a, b| migrations[*a].name.cmp(&migrations[*b].name)); // Stable sort by name
+
+        let mut ordered_indices = Vec::new();
+
+        while let Some(idx) = queue.pop() {
+            ordered_indices.push(idx);
+
+            for &dependent in &reverse_graph[idx] {
+                in_degree[dependent] -= 1;
+                if in_degree[dependent] == 0 {
+                    queue.push(dependent);
+                    queue.sort_by(|a, b| migrations[*a].name.cmp(&migrations[*b].name));
+                }
+            }
+        }
+
+        if ordered_indices.len() != migrations.len() {
+            // Circular dependency detected
+            let remaining: Vec<String> = migrations
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !ordered_indices.contains(i))
+                .map(|(_, m)| m.name.clone())
+                .collect();
+
+            return Err(GatewayError::SchemaExtractionFailed {
+                cause: format!(
+                    "Circular dependency detected in migrations: {}",
+                    remaining.join(", ")
+                ),
+            });
+        }
+
+        // Reorder migrations
+        let ordered: Vec<MigrationFile> = ordered_indices
+            .into_iter()
+            .map(|i| migrations[i].clone())
+            .collect();
+
+        // Log the order
+        info!("Migration execution order (based on dependencies):");
+        for (i, m) in ordered.iter().enumerate() {
+            info!("  {}. {}", i + 1, m.name);
+        }
+
+        Ok(ordered)
+    }
+
+    /// Run migrations with optional dependency validation
+    /// If validate_deps is true and dependencies are invalid, returns an error
+    pub async fn run_migrations_with_validation(
+        &self,
+        pool: &Pool,
+        database: &str,
+        migrations_dir: &Path,
+        validate_deps: bool,
+    ) -> Result<(usize, Option<DependencyValidation>)> {
+        // Validate dependencies first if requested
+        let validation = if validate_deps {
+            let v = self.validate_dependencies(migrations_dir)?;
+            if !v.is_valid {
+                return Err(GatewayError::MigrationFailed {
+                    database: database.to_string(),
+                    migration: "dependency validation".to_string(),
+                    cause: format!(
+                        "Table dependency order is invalid. {} issues found. Suggested table creation order: {}",
+                        v.issues.len(),
+                        v.suggested_order.join(" → ")
+                    ),
+                });
+            }
+            Some(v)
+        } else {
+            None
+        };
+
+        let count = self.run_migrations(pool, database, migrations_dir).await?;
+        Ok((count, validation))
     }
 
     pub async fn run_migrations(
@@ -125,6 +394,17 @@ impl MigrationRunner {
         pool: &Pool,
         database: &str,
         migrations_dir: &Path,
+    ) -> Result<usize> {
+        self.run_migrations_ordered(pool, database, migrations_dir, true).await
+    }
+
+    /// Run migrations with optional automatic dependency ordering
+    pub async fn run_migrations_ordered(
+        &self,
+        pool: &Pool,
+        database: &str,
+        migrations_dir: &Path,
+        auto_order: bool,
     ) -> Result<usize> {
         // Ensure migrations table exists
         self.ensure_migrations_table(pool, database).await?;
@@ -144,6 +424,13 @@ impl MigrationRunner {
             migration_files.len(),
             migrations_dir
         );
+
+        // Order by dependencies if requested
+        let migration_files = if auto_order && !migration_files.is_empty() {
+            self.order_by_dependencies(migration_files)?
+        } else {
+            migration_files
+        };
 
         let mut count = 0;
 

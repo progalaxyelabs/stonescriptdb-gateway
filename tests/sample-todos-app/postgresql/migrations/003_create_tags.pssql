@@ -1,0 +1,16 @@
+-- Migration: Create tags and todo_tags tables
+-- Order: 003
+
+CREATE TABLE IF NOT EXISTS tags (
+    tag_id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    color VARCHAR(7) DEFAULT '#3B82F6'
+);
+
+CREATE TABLE IF NOT EXISTS todo_tags (
+    todo_id INTEGER NOT NULL REFERENCES todos(todo_id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
+    PRIMARY KEY (todo_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);

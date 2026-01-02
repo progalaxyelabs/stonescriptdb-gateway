@@ -1,0 +1,26 @@
+CREATE OR REPLACE FUNCTION update_todo(
+    p_todo_id INT,
+    p_user_id INT,
+    p_title VARCHAR(500) DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_priority INT DEFAULT NULL,
+    p_due_date DATE DEFAULT NULL
+)
+RETURNS INT AS $$
+DECLARE
+    v_rows_affected INT;
+BEGIN
+    UPDATE todos
+    SET
+        title = COALESCE(p_title, title),
+        description = COALESCE(p_description, description),
+        priority = COALESCE(p_priority, priority),
+        due_date = COALESCE(p_due_date, due_date),
+        updated_on = NOW()
+    WHERE todo_id = p_todo_id
+      AND user_id = p_user_id;
+
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+    RETURN v_rows_affected;
+END;
+$$ LANGUAGE plpgsql;

@@ -92,14 +92,30 @@ See [HLD.md](./HLD.md) for detailed architecture documentation.
 
 ## API Endpoints
 
+### Legacy Endpoints (v1 - Upload schema each time)
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/register` | POST | Container startup: deploy schema to database |
-| `/migrate` | POST | Hot update: deploy schema without restart |
+| `/register` | POST | Deploy schema + create database (multipart: platform, schema.tar.gz) |
+| `/migrate` | POST | Deploy schema to existing databases (multipart: platform, schema.tar.gz) |
 | `/call` | POST | Execute database function |
 | `/health` | GET | Health check |
 | `/admin/databases` | GET | List databases for a platform |
 | `/admin/create-tenant` | POST | Create new tenant database |
+
+### Platform Management Endpoints (v2 - Stored schemas)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/platform/register` | POST | Register platform (JSON: `{platform}`) |
+| `/platform/{platform}/schema` | POST | Upload schema (multipart: schema_name, schema.tar.gz) |
+| `/platform/{platform}/schemas` | GET | List registered schemas |
+| `/platform/{platform}/databases` | GET | List created databases |
+| `/platforms` | GET | List all platforms |
+| `/database/create` | POST | Create database from stored schema (JSON) |
+| `/v2/migrate` | POST | Migrate using stored schemas (JSON) |
+
+See [docs/API-V2.md](./docs/API-V2.md) for detailed v2 API documentation.
 
 ## Development
 
@@ -406,7 +422,8 @@ php stone gateway:migrate
 ## Documentation
 
 - **[Quick Start Guide](./docs/QUICKSTART.md)** - Get started in 5 minutes
-- **[Integration Guide](./docs/INTEGRATION.md)** - Detailed integration documentation
+- **[Integration Guide](./docs/INTEGRATION.md)** - Detailed integration documentation (v1 API)
+- **[API v2 Guide](./docs/API-V2.md)** - Multi-tenant platform management with stored schemas
 - **[High-Level Design](./HLD.md)** - Architecture and design decisions
 
 ## Running Tests

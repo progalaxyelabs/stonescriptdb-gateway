@@ -1,0 +1,649 @@
+# StoneScriptDB Gateway API v2
+
+Multi-tenant schema registry with stored schemas. This API allows platforms to register once, upload schemas, and create databases on demand.
+
+## Quick Start
+
+```bash
+# 1. Register your platform
+curl -X POST http://localhost:9000/platform/register \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp"}'
+
+# 2. Upload schemas (main_db, tenant_db, etc.)
+curl -X POST http://localhost:9000/platform/medstoreapp/schema \
+  -F "schema_name=tenant_db" \
+  -F "schema=@tenant_db.tar.gz"
+
+# 3. Create databases on demand
+curl -X POST http://localhost:9000/database/create \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_001"}'
+
+# 4. Migrate all databases of a schema type
+curl -X POST http://localhost:9000/v2/migrate \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "tenant_db"}'
+```
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            Platform Lifecycle                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Day 1: Platform Registration
+┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│  Register        │────▶│  Upload          │────▶│  Create          │
+│  Platform        │     │  main_db schema  │     │  main database   │
+│                  │     │  tenant_db schema│     │                  │
+└──────────────────┘     └──────────────────┘     └──────────────────┘
+
+Day 2+: Creating Tenants
+┌──────────────────┐
+│  Create DB from  │────▶  medstoreapp_tenant_db_store_001
+│  tenant_db       │────▶  medstoreapp_tenant_db_store_002
+│  schema          │────▶  medstoreapp_tenant_db_store_003
+└──────────────────┘
+
+Week 5: Add New Schema Type
+┌──────────────────┐     ┌──────────────────┐
+│  Upload          │────▶│  Create          │
+│  analytics_db    │     │  analytics DB    │
+│  schema          │     │                  │
+└──────────────────┘     └──────────────────┘
+```
+
+---
+
+## Storage Structure
+
+Schemas are stored on the gateway server:
+
+```
+{DATA_DIR}/
+├── medstoreapp/
+│   ├── platform.json           # Platform metadata
+│   ├── main_db/
+│   │   ├── extensions/
+│   │   ├── types/
+│   │   ├── tables/
+│   │   ├── functions/
+│   │   ├── seeders/
+│   │   └── migrations/
+│   ├── tenant_db/
+│   │   ├── tables/
+│   │   ├── functions/
+│   │   └── migrations/
+│   └── analytics_db/
+│       └── ...
+└── otherplatform/
+    └── ...
+```
+
+Default `DATA_DIR` is `./data`. Configure via environment variable:
+```bash
+DATA_DIR=/opt/stonescriptdb-gateway/schemas
+```
+
+---
+
+## API Reference
+
+### POST /platform/register
+
+Register a new platform. **No schema required** - you can add schemas later.
+
+**Request:**
+```json
+{
+  "platform": "medstoreapp"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "status": "registered",
+  "platform": "medstoreapp",
+  "message": "Platform registered. Use POST /platform/{platform}/schema to add schemas."
+}
+```
+
+**Error - Platform exists (400):**
+```json
+{
+  "error": "invalid_request",
+  "message": "Platform 'medstoreapp' is already registered"
+}
+```
+
+---
+
+### POST /platform/{platform}/schema
+
+Upload a schema for a registered platform. The schema is extracted and stored for later database creation.
+
+**Request (multipart/form-data):**
+- `schema_name` or `name`: Schema identifier (e.g., `main_db`, `tenant_db`, `analytics_db`)
+- `schema` or `file`: tar.gz file containing schema folders
+
+**Example:**
+```bash
+# Create schema archive
+tar -czf tenant_db.tar.gz -C src/postgresql .
+
+# Upload to gateway
+curl -X POST http://localhost:9000/platform/medstoreapp/schema \
+  -F "schema_name=tenant_db" \
+  -F "schema=@tenant_db.tar.gz"
+```
+
+**Response (201 Created):**
+```json
+{
+  "status": "registered",
+  "platform": "medstoreapp",
+  "schema_name": "tenant_db",
+  "has_tables": true,
+  "has_functions": true,
+  "has_migrations": true,
+  "checksum": "a1b2c3d4..."
+}
+```
+
+**Schema tar.gz structure:**
+```
+postgresql/           # Optional wrapper (stripped automatically)
+├── extensions/       # PostgreSQL extensions
+├── types/            # Custom types (ENUM, composite, domain)
+├── tables/           # Declarative table definitions
+├── functions/        # PostgreSQL functions
+├── seeders/          # Seed data
+└── migrations/       # Migration files
+```
+
+Or without the postgresql wrapper:
+```
+tables/
+functions/
+migrations/
+...
+```
+
+---
+
+### GET /platform/{platform}/schemas
+
+List all registered schemas for a platform.
+
+**Response:**
+```json
+{
+  "platform": "medstoreapp",
+  "schemas": [
+    {
+      "name": "main_db",
+      "has_tables": true,
+      "has_functions": true,
+      "has_migrations": true,
+      "has_seeders": true
+    },
+    {
+      "name": "tenant_db",
+      "has_tables": true,
+      "has_functions": true,
+      "has_migrations": true,
+      "has_seeders": false
+    }
+  ],
+  "count": 2
+}
+```
+
+---
+
+### GET /platform/{platform}/databases
+
+List all databases created for a platform. Optional filter by schema.
+
+**Query Parameters:**
+- `schema` (optional): Filter by schema name
+
+**Examples:**
+```bash
+# List all databases
+curl http://localhost:9000/platform/medstoreapp/databases
+
+# Filter by schema
+curl "http://localhost:9000/platform/medstoreapp/databases?schema=tenant_db"
+```
+
+**Response:**
+```json
+{
+  "platform": "medstoreapp",
+  "databases": [
+    {
+      "id": "main",
+      "database_name": "medstoreapp_main_db_main",
+      "schema_name": "main_db",
+      "created_at": "2024-01-15T10:30:00Z"
+    },
+    {
+      "id": "store_001",
+      "database_name": "medstoreapp_tenant_db_store_001",
+      "schema_name": "tenant_db",
+      "created_at": "2024-01-15T11:00:00Z"
+    }
+  ],
+  "count": 2
+}
+```
+
+---
+
+### GET /platforms
+
+List all registered platforms.
+
+**Response:**
+```json
+{
+  "platforms": [
+    {
+      "name": "medstoreapp",
+      "schemas": 2,
+      "databases": 5
+    },
+    {
+      "name": "hrmapp",
+      "schemas": 1,
+      "databases": 3
+    }
+  ],
+  "count": 2
+}
+```
+
+---
+
+### POST /database/create
+
+Create a new database from a stored schema.
+
+**Request:**
+```json
+{
+  "platform": "medstoreapp",
+  "schema_name": "tenant_db",
+  "database_id": "store_001"
+}
+```
+
+**Database naming:** `{platform}_{schema_name}_{database_id}`
+- Example: `medstoreapp_tenant_db_store_001`
+
+**Response (201 Created):**
+```json
+{
+  "status": "created",
+  "platform": "medstoreapp",
+  "schema_name": "tenant_db",
+  "database_name": "medstoreapp_tenant_db_store_001",
+  "extensions_installed": 2,
+  "types_deployed": 3,
+  "tables_created": 15,
+  "functions_deployed": 42,
+  "seeders": [
+    {"table": "roles", "inserted": 3, "skipped": 0}
+  ],
+  "execution_time_ms": 350
+}
+```
+
+**Error - Database exists (400):**
+```json
+{
+  "error": "database_already_exists",
+  "database": "medstoreapp_tenant_db_store_001"
+}
+```
+
+---
+
+### POST /v2/migrate
+
+Migrate databases using stored schemas. Can migrate a single database or all databases of a schema type.
+
+**Request - Migrate all databases of a schema type:**
+```json
+{
+  "platform": "medstoreapp",
+  "schema_name": "tenant_db"
+}
+```
+
+**Request - Migrate single database:**
+```json
+{
+  "platform": "medstoreapp",
+  "schema_name": "tenant_db",
+  "database_id": "store_001"
+}
+```
+
+**Request - Force mode (bypass data loss checks):**
+```json
+{
+  "platform": "medstoreapp",
+  "schema_name": "tenant_db",
+  "force": true
+}
+```
+
+**Response:**
+```json
+{
+  "status": "completed",
+  "platform": "medstoreapp",
+  "schema_name": "tenant_db",
+  "databases_updated": [
+    "medstoreapp_tenant_db_store_001",
+    "medstoreapp_tenant_db_store_002",
+    "medstoreapp_tenant_db_store_003"
+  ],
+  "migrations_applied": 2,
+  "functions_updated": 5,
+  "seeder_validations": [],
+  "schema_validation": {
+    "safe_changes": [],
+    "dataloss_changes": [],
+    "incompatible_changes": []
+  },
+  "verification": {
+    "passed": true,
+    "extensions_verified": true,
+    "types_verified": true,
+    "tables_verified": true,
+    "seeders_verified": true
+  },
+  "execution_time_ms": 1250
+}
+```
+
+---
+
+## StoneScriptPHP Integration
+
+### Configuration
+
+In your platform's `.env`:
+```env
+DB_GATEWAY_URL=http://localhost:9000
+PLATFORM_ID=medstoreapp
+```
+
+### Artisan Commands
+
+```bash
+# Register platform (one-time)
+php stone gateway:platform:register
+
+# Upload schema (after schema changes)
+php stone gateway:schema:upload --name=tenant_db
+
+# Create tenant database
+php stone gateway:database:create --schema=tenant_db --id=store_001
+
+# Migrate all tenant databases
+php stone gateway:migrate --schema=tenant_db
+
+# Migrate single database
+php stone gateway:migrate --schema=tenant_db --id=store_001
+```
+
+### PHP Service Example
+
+```php
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Http;
+
+class GatewayService
+{
+    private string $baseUrl;
+    private string $platform;
+
+    public function __construct()
+    {
+        $this->baseUrl = config('database.gateway_url');
+        $this->platform = config('database.platform_id');
+    }
+
+    /**
+     * Register platform (one-time setup)
+     */
+    public function registerPlatform(): array
+    {
+        $response = Http::post("{$this->baseUrl}/platform/register", [
+            'platform' => $this->platform,
+        ]);
+
+        return $response->json();
+    }
+
+    /**
+     * Upload a schema
+     */
+    public function uploadSchema(string $schemaName, string $tarGzPath): array
+    {
+        $response = Http::attach(
+            'schema', file_get_contents($tarGzPath), 'schema.tar.gz'
+        )->post("{$this->baseUrl}/platform/{$this->platform}/schema", [
+            'schema_name' => $schemaName,
+        ]);
+
+        return $response->json();
+    }
+
+    /**
+     * Create a new tenant database
+     */
+    public function createDatabase(string $schemaName, string $databaseId): array
+    {
+        $response = Http::post("{$this->baseUrl}/database/create", [
+            'platform' => $this->platform,
+            'schema_name' => $schemaName,
+            'database_id' => $databaseId,
+        ]);
+
+        return $response->json();
+    }
+
+    /**
+     * Migrate all databases of a schema type
+     */
+    public function migrate(string $schemaName, ?string $databaseId = null, bool $force = false): array
+    {
+        $payload = [
+            'platform' => $this->platform,
+            'schema_name' => $schemaName,
+            'force' => $force,
+        ];
+
+        if ($databaseId) {
+            $payload['database_id'] = $databaseId;
+        }
+
+        $response = Http::post("{$this->baseUrl}/v2/migrate", $payload);
+
+        return $response->json();
+    }
+
+    /**
+     * List schemas for this platform
+     */
+    public function listSchemas(): array
+    {
+        $response = Http::get("{$this->baseUrl}/platform/{$this->platform}/schemas");
+        return $response->json();
+    }
+
+    /**
+     * List databases for this platform
+     */
+    public function listDatabases(?string $schemaFilter = null): array
+    {
+        $url = "{$this->baseUrl}/platform/{$this->platform}/databases";
+        if ($schemaFilter) {
+            $url .= "?schema={$schemaFilter}";
+        }
+
+        $response = Http::get($url);
+        return $response->json();
+    }
+}
+```
+
+### Startup Flow
+
+```php
+// In a service provider or startup hook
+public function boot()
+{
+    $gateway = app(GatewayService::class);
+
+    // Check if platform is registered
+    $platforms = Http::get("{$gateway->baseUrl}/platforms")->json();
+    $registered = collect($platforms['platforms'] ?? [])
+        ->contains('name', config('database.platform_id'));
+
+    if (!$registered) {
+        // First-time registration
+        $gateway->registerPlatform();
+
+        // Upload schemas
+        $gateway->uploadSchema('main_db', storage_path('schemas/main_db.tar.gz'));
+        $gateway->uploadSchema('tenant_db', storage_path('schemas/tenant_db.tar.gz'));
+
+        // Create main database
+        $gateway->createDatabase('main_db', 'main');
+    }
+}
+```
+
+---
+
+## Workflow Examples
+
+### Example 1: New Platform Setup
+
+```bash
+# 1. Register platform
+curl -X POST http://localhost:9000/platform/register \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp"}'
+
+# 2. Upload main_db schema
+curl -X POST http://localhost:9000/platform/medstoreapp/schema \
+  -F "schema_name=main_db" \
+  -F "schema=@main_db.tar.gz"
+
+# 3. Upload tenant_db schema
+curl -X POST http://localhost:9000/platform/medstoreapp/schema \
+  -F "schema_name=tenant_db" \
+  -F "schema=@tenant_db.tar.gz"
+
+# 4. Create main database
+curl -X POST http://localhost:9000/database/create \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "main_db", "database_id": "main"}'
+```
+
+### Example 2: Creating Tenant Databases
+
+```bash
+# Create databases for new stores
+curl -X POST http://localhost:9000/database/create \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_mumbai"}'
+
+curl -X POST http://localhost:9000/database/create \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_delhi"}'
+
+curl -X POST http://localhost:9000/database/create \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_bangalore"}'
+```
+
+### Example 3: Schema Update & Migration
+
+```bash
+# 1. Update schema (e.g., new migration added)
+curl -X POST http://localhost:9000/platform/medstoreapp/schema \
+  -F "schema_name=tenant_db" \
+  -F "schema=@tenant_db.tar.gz"
+
+# 2. Migrate ALL tenant databases
+curl -X POST http://localhost:9000/v2/migrate \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "tenant_db"}'
+```
+
+### Example 4: Adding New Schema Type Later
+
+```bash
+# Week 5: Add analytics schema
+curl -X POST http://localhost:9000/platform/medstoreapp/schema \
+  -F "schema_name=analytics_db" \
+  -F "schema=@analytics_db.tar.gz"
+
+# Create analytics database
+curl -X POST http://localhost:9000/database/create \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "medstoreapp", "schema_name": "analytics_db", "database_id": "main"}'
+```
+
+---
+
+## Error Handling
+
+All errors return a JSON body with `error` and `message` fields:
+
+```json
+{
+  "error": "error_code",
+  "message": "Human-readable description"
+}
+```
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `invalid_request` | Missing required field, invalid format |
+| 400 | `database_already_exists` | Database already exists |
+| 404 | `database_not_found` | Database not found |
+| 409 | `migration_failed` | Migration or verification failed |
+
+---
+
+## Comparison: v1 vs v2
+
+| Feature | v1 (Legacy) | v2 (Stored Schemas) |
+|---------|-------------|---------------------|
+| Schema upload | Every request | Once, then stored |
+| Platform registration | Implicit | Explicit |
+| Multiple schema types | No | Yes (main_db, tenant_db, etc.) |
+| Database creation | With schema upload | From stored schema |
+| Migrate request | Multipart with tar.gz | JSON with schema reference |
+| Bandwidth | High (upload each time) | Low (reference stored) |
+
+**When to use v1:** Simple setups, single schema type, existing integrations.
+
+**When to use v2:** Multi-tenant platforms, multiple schema types, bandwidth optimization, schema registry pattern.

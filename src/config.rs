@@ -1,6 +1,7 @@
 use ipnetwork::IpNetwork;
 use std::env;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -14,6 +15,7 @@ pub struct Config {
     pub pool_idle_timeout: Duration,
     pub pool_max_lifetime: Duration,
     pub allowed_networks: Vec<IpNetwork>,
+    pub data_dir: PathBuf,
 }
 
 impl Config {
@@ -76,6 +78,10 @@ impl Config {
             })
             .collect();
 
+        let data_dir = env::var("DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("./data"));
+
         Ok(Config {
             database_url,
             gateway_host,
@@ -85,6 +91,7 @@ impl Config {
             pool_idle_timeout: Duration::from_secs(pool_idle_timeout_secs),
             pool_max_lifetime: Duration::from_secs(pool_max_lifetime_secs),
             allowed_networks,
+            data_dir,
         })
     }
 

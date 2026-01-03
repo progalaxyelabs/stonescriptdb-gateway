@@ -209,6 +209,7 @@ fi
 # Create directories
 echo -e "${YELLOW}Creating directories...${NC}"
 mkdir -p "$INSTALL_DIR/schemas"
+mkdir -p "$INSTALL_DIR/data"     # Schema storage for v2 API
 mkdir -p "$INSTALL_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -240,6 +241,9 @@ POOL_MAX_LIFETIME_SECS=3600
 
 # Security
 ALLOWED_NETWORKS=127.0.0.0/8,::1/128,10.0.1.0/24
+
+# Schema storage (v2 API)
+DATA_DIR=/opt/stonescriptdb-gateway/data
 
 # Logging
 LOG_DIR=/var/log/stonescriptdb-gateway

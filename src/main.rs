@@ -2,12 +2,15 @@ mod api;
 mod config;
 mod error;
 mod pool;
+mod registry;
 mod schema;
 mod security;
 
 use crate::api::{
-    admin_create_tenant, admin_list_databases, call_function, health_check, migrate_schema,
-    register_schema,
+    admin_create_tenant, admin_list_databases, call_function, create_database, health_check,
+    list_databases, list_platforms, list_schemas, migrate_schema, migrate_schema_v2,
+    register_platform, register_platform_schema, register_schema, DatabaseState, MigrateV2State,
+    PlatformState,
 };
 use crate::config::Config;
 use crate::pool::PoolManager;
@@ -83,25 +86,62 @@ async fn main() -> anyhow::Result<()> {
     // Create pool manager
     let pool_manager = Arc::new(PoolManager::new(config.clone()).await?);
 
+    // Create platform state for schema registry
+    let platform_state = Arc::new(PlatformState::new(&config.data_dir));
+
+    // Create database state (combines pool manager and platform state)
+    let database_state = Arc::new(DatabaseState {
+        pool_manager: pool_manager.clone(),
+        platform_state: platform_state.clone(),
+    });
+
+    // Create migrate v2 state
+    let migrate_v2_state = Arc::new(MigrateV2State {
+        pool_manager: pool_manager.clone(),
+        platform_state: platform_state.clone(),
+    });
+
     // Start time for uptime tracking
     let start_time = Instant::now();
 
     // Create IP filter middleware
     let ip_filter = IpFilterLayer::new(config.allowed_networks.clone());
 
-    // Build router
+    // Build router with legacy and new endpoints
     let app = Router::new()
         // Health check (no IP filter - for load balancer)
         .route("/health", get(health_check))
-        // Protected routes
+        // Legacy endpoints (v1 - multipart form with schema upload)
         .route("/register", post(register_schema))
         .route("/migrate", post(migrate_schema))
         .route("/call", post(call_function))
         .route("/admin/databases", get(admin_list_databases))
         .route("/admin/create-tenant", post(admin_create_tenant))
-        .layer(ip_filter)
+        .layer(ip_filter.clone())
         .layer(TraceLayer::new_for_http())
-        .with_state((pool_manager.clone(), start_time));
+        .with_state((pool_manager.clone(), start_time))
+        // New platform management endpoints (v2 - stored schemas)
+        .nest(
+            "/platform",
+            Router::new()
+                .route("/register", post(register_platform))
+                .route("/{platform}/schema", post(register_platform_schema))
+                .route("/{platform}/schemas", get(list_schemas))
+                .route("/{platform}/databases", get(list_databases))
+                .layer(ip_filter.clone())
+                .with_state(platform_state.clone()),
+        )
+        .route("/platforms", get(list_platforms).with_state(platform_state.clone()))
+        // New database creation endpoint
+        .route(
+            "/database/create",
+            post(create_database).with_state(database_state),
+        )
+        // New migrate endpoint using stored schemas
+        .route(
+            "/v2/migrate",
+            post(migrate_schema_v2).with_state(migrate_v2_state),
+        );
 
     // Spawn cleanup task for idle pools
     let cleanup_pool_manager = pool_manager.clone();

@@ -1,5 +1,10 @@
 # StoneScript DB Gateway - High Level Design
 
+---
+**📖 Navigation:** [Home](README.md) | [Quick Start](docs/QUICKSTART.md) | [Integration](docs/INTEGRATION.md) | **HLD** | [Dev Setup](docs/DEV-ENVIRONMENT.md) | [API v2](docs/API-V2.md)
+
+---
+
 ## 1. Overview
 
 ### 1.1 Purpose
@@ -79,17 +84,28 @@ A single Rust service that:
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Dev vs Prod Environment
+### 2.2 Deployment Architecture
+
+The gateway runs in a dedicated VM alongside PostgreSQL, separate from the Docker host:
 
 ```
-DEV (Local Machine):
-  Platform (php stone serve) → localhost:9000 → localhost:5432
+DEV Environment:
+  Docker containers on host (rootless) → VM IP (e.g., 192.168.122.10:9000)
+  Gateway on VM → localhost:5432 (PostgreSQL on same VM)
 
-PROD (Azure VNet):
-  Platform (Swarm container) → 10.0.1.6:9000 → 10.0.1.6:5432
+PROD Environment:
+  Platform containers (Docker Swarm) → VM IP (e.g., 10.0.1.6:9000)
+  Gateway on VM → localhost:5432 (PostgreSQL on same VM)
 ```
 
-Same codebase, different `DB_GATEWAY_URL` environment variable.
+**Benefits of VM-based deployment:**
+- Avoids rootless Docker network complexity
+- Better isolation between compute (containers) and data (database)
+- Simplified backup and recovery (entire VM snapshot)
+- Easier database performance tuning
+- Standard PostgreSQL deployment patterns
+
+Same codebase across environments, only `DB_GATEWAY_URL` changes.
 
 ## 3. API Design
 

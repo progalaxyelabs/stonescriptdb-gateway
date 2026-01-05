@@ -1,5 +1,14 @@
 # Quick Start Guide
 
+---
+**📖 Navigation:** [Home](../README.md) | **Quick Start** | [Integration](INTEGRATION.md) | [HLD](../HLD.md) | [Dev Setup](DEV-ENVIRONMENT.md) | [API v2](API-V2.md)
+
+---
+
+This guide assumes you have a StoneScriptDB Gateway running in a VM accessible from your development environment (e.g., at `http://<VM_IP>:9000`).
+
+If you haven't set up the gateway yet, see [DEV-ENVIRONMENT.md](./DEV-ENVIRONMENT.md) for VM setup instructions.
+
 ## For Platform Developers
 
 ### 1. Create Your Schema Structure
@@ -59,8 +68,8 @@ $$ LANGUAGE plpgsql;
 # Create archive
 tar -czf schema.tar.gz -C src postgresql
 
-# Register
-curl -X POST http://localhost:9000/register \
+# Register (replace with your VM IP)
+curl -X POST http://<VM_IP>:9000/register \
   -F "platform=myapp" \
   -F "schema=@schema.tar.gz"
 ```
@@ -68,7 +77,8 @@ curl -X POST http://localhost:9000/register \
 ### 7. Call Your Function
 
 ```bash
-curl -X POST http://localhost:9000/call \
+# Replace with your VM IP
+curl -X POST http://<VM_IP>:9000/call \
   -H "Content-Type: application/json" \
   -d '{"platform": "myapp", "function": "get_user_by_id", "params": [1]}'
 ```
@@ -96,7 +106,7 @@ postgresql/
 Just add to your `.env`:
 
 ```env
-DB_GATEWAY_URL=http://localhost:9000
+DB_GATEWAY_URL=http://<VM_IP>:9000  # Replace with your VM IP
 PLATFORM_ID=myapp
 ```
 
@@ -117,7 +127,8 @@ CREATE TABLE IF NOT EXISTS posts (...);
 
 ```bash
 tar -czf schema.tar.gz -C src postgresql
-curl -X POST http://localhost:9000/migrate \
+# Replace with your VM IP
+curl -X POST http://<VM_IP>:9000/migrate \
   -F "platform=myapp" \
   -F "schema=@schema.tar.gz"
 ```

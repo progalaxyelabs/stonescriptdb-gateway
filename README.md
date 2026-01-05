@@ -23,35 +23,77 @@ This service acts as a centralized database proxy and schema orchestrator for mu
 - **Function Signature Tracking**: Intelligent function deployment with orphan cleanup
 - **Seeder Validation**: Seed data integrity checking on migrations
 
+## 📚 Documentation
+
+- ⚡ **[Quick Start Guide](docs/QUICKSTART.md)** - Get running in 5 minutes
+- 🔌 **[Integration Guide](docs/INTEGRATION.md)** - Connect your platform (Docker, CI/CD, multi-tenant)
+- 🏗️ **[Architecture (HLD)](HLD.md)** - Technical design & decisions
+- 🛠️ **[Development Environment](docs/DEV-ENVIRONMENT.md)** - Local VM setup with libvirt
+- 📡 **[API v2](docs/API-V2.md)** - Multi-tenant platform management with stored schemas
+
 ## Quick Start
 
-### Installation from Release
+### Recommended Deployment: Separate VM
+
+The gateway is designed to run in a dedicated VM alongside PostgreSQL, separate from your Docker host. This provides:
+- Clean separation of concerns
+- Better network isolation
+- Easier database backup and maintenance
+- Avoids rootless Docker networking issues
+
+**Setup:**
+
+1. **Create a VM** with PostgreSQL 16 installed (e.g., using libvirt, VirtualBox, or cloud provider)
+2. **Configure static IP** for the VM on a bridge network accessible from your Docker host
+3. **Deploy the gateway** on the VM
 
 ```bash
-# Clone specific version
+# On the VM:
 git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
 cd stonescriptdb-gateway
 git checkout v1.0.0
 
+# Build the binary (or use Docker build)
+cargo build --release
+
 # Install as systemd service
-sudo ./deploy/install.sh
+sudo mkdir -p /opt/stonescriptdb-gateway
+sudo cp target/release/stonescriptdb-gateway /opt/stonescriptdb-gateway/
+sudo cp deploy/stonescriptdb-gateway.service /etc/systemd/system/
 
 # Configure
 sudo nano /opt/stonescriptdb-gateway/.env
+# Set:
+#   DB_HOST=localhost (PostgreSQL on same VM)
+#   GATEWAY_HOST=0.0.0.0 (listen on all interfaces)
+#   ALLOWED_NETWORKS=<your-docker-host-subnet>
 
 # Start
+sudo systemctl daemon-reload
+sudo systemctl enable stonescriptdb-gateway
 sudo systemctl start stonescriptdb-gateway
 ```
 
-### Updating to Latest Release
+4. **Configure your Docker containers** to access the gateway at `http://<VM_IP>:9000`
+
+See [docs/DEV-ENVIRONMENT.md](./docs/DEV-ENVIRONMENT.md) for detailed VM setup instructions.
+
+### Alternative: Local Development
+
+For local development and testing, you can run the gateway directly:
 
 ```bash
-cd /path/to/stonescriptdb-gateway
-git fetch --tags
-git checkout v1.1.0  # or latest version
-cargo build --release
-sudo cp target/release/stonescriptdb-gateway /opt/stonescriptdb-gateway/
-sudo systemctl restart stonescriptdb-gateway
+# Clone
+git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
+cd stonescriptdb-gateway
+
+# Setup
+cargo build
+cp .env.example .env
+# Edit .env with your PostgreSQL credentials
+
+# Run
+cargo run
 ```
 
 ## How It Works
@@ -71,21 +113,22 @@ Platform API → POST /call → Gateway → PostgreSQL function → Response
 ## Architecture
 
 ```
-Platform Containers              StoneScriptDB Gateway
-┌──────────────────┐           ┌──────────────────┐
-│ platform-a-api   │──────────▶│                  │
-│ platform-b-api   │  /register│  Rust Service    │
-│ platform-c-api   │  /call    │  (port 9000)     │
-└──────────────────┘           └────────┬─────────┘
-                                        │
-                                        ▼
-                               ┌──────────────────┐
-                               │  PostgreSQL 16   │
-                               │  (port 5432)     │
-                               │                  │
-                               │  *_main DBs      │
-                               │  *_tenant DBs    │
-                               └──────────────────┘
+Docker Host                     Database VM (e.g., <VM_IP>)
+┌──────────────────┐           ┌──────────────────────────────────┐
+│ Platform Containers          │  StoneScriptDB Gateway           │
+│                  │           │  ┌────────────────────────────┐  │
+│ platform-a-api   │──────────▶│  │ Rust Service (port 9000)   │  │
+│ platform-b-api   │  HTTP     │  │ /register, /migrate, /call │  │
+│ platform-c-api   │           │  └────────────┬───────────────┘  │
+└──────────────────┘           │               │                  │
+                               │               ▼                  │
+                               │  ┌────────────────────────────┐  │
+                               │  │ PostgreSQL 16 (port 5432)  │  │
+                               │  │                            │  │
+                               │  │ *_main DBs                 │  │
+                               │  │ *_tenant DBs               │  │
+                               │  └────────────────────────────┘  │
+                               └──────────────────────────────────┘
 ```
 
 See [HLD.md](./HLD.md) for detailed architecture documentation.
@@ -111,9 +154,11 @@ See [HLD.md](./HLD.md) for detailed architecture documentation.
 | `/platform/{platform}/schema` | POST | Upload schema (multipart: schema_name, schema.tar.gz) |
 | `/platform/{platform}/schemas` | GET | List registered schemas |
 | `/platform/{platform}/databases` | GET | List created databases |
-| `/platforms` | GET | List all platforms |
+| `/platforms` | GET | List all platforms with schema/database counts |
 | `/database/create` | POST | Create database from stored schema (JSON) |
 | `/v2/migrate` | POST | Migrate using stored schemas (JSON) |
+
+**Note:** The `/platforms` endpoint reads from the file-based platform registry (persisted to disk), not in-memory connection pools. Per-database deployment tracking (migrations, functions, types) is stored in PostgreSQL tables with checksums to skip unchanged deployments.
 
 See [docs/API-V2.md](./docs/API-V2.md) for detailed v2 API documentation.
 
@@ -137,15 +182,18 @@ docker run --rm -v "$PWD/output:/output" stonescriptdb-gateway-builder
 # Binary output: ./output/stonescriptdb-gateway
 ```
 
-### Deploy to Server
+### Deploy to VM
 
 ```bash
-# Upload binary
-scp output/stonescriptdb-gateway user@server:/tmp/
+# Upload binary to VM
+scp output/stonescriptdb-gateway user@vm-ip:/tmp/
 
-# Install on server
-ssh user@server
+# Install on VM
+ssh user@vm-ip
+sudo mkdir -p /opt/stonescriptdb-gateway
 sudo cp /tmp/stonescriptdb-gateway /opt/stonescriptdb-gateway/
+sudo cp /path/to/deploy/stonescriptdb-gateway.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl restart stonescriptdb-gateway
 ```
 
@@ -171,16 +219,27 @@ cargo test
 cargo build --release
 ```
 
-### Production Deployment (systemd)
+### Production Deployment on VM
 
 ```bash
-# Install as systemd service
-sudo ./deploy/install.sh
+# On the VM with PostgreSQL installed:
+
+# Create installation directory
+sudo mkdir -p /opt/stonescriptdb-gateway
+sudo mkdir -p /var/log/stonescriptdb-gateway
+
+# Copy binary
+sudo cp target/release/stonescriptdb-gateway /opt/stonescriptdb-gateway/
+
+# Install systemd service
+sudo cp deploy/stonescriptdb-gateway.service /etc/systemd/system/
 
 # Configure
 sudo nano /opt/stonescriptdb-gateway/.env
 
 # Start service
+sudo systemctl daemon-reload
+sudo systemctl enable stonescriptdb-gateway
 sudo systemctl start stonescriptdb-gateway
 
 # Check status
@@ -190,7 +249,7 @@ sudo systemctl status stonescriptdb-gateway
 sudo journalctl -u stonescriptdb-gateway -f
 ```
 
-See `deploy/` directory for installation scripts and systemd service file.
+See `deploy/` directory for the systemd service file.
 
 ## Environment Variables
 
@@ -205,12 +264,12 @@ DB_PASSWORD=your_password
 # Or use DATABASE_URL (less recommended due to special char issues)
 # DATABASE_URL=postgres://gateway_user:password@localhost:5432/postgres
 
-GATEWAY_HOST=127.0.0.1
+GATEWAY_HOST=0.0.0.0
 GATEWAY_PORT=9000
 MAX_CONNECTIONS_PER_POOL=10
 MAX_TOTAL_CONNECTIONS=200
 POOL_IDLE_TIMEOUT_SECS=1800
-ALLOWED_NETWORKS=127.0.0.0/8,10.0.1.0/24
+ALLOWED_NETWORKS=127.0.0.0/8,192.168.122.0/24
 RUST_LOG=info
 ```
 
@@ -394,15 +453,28 @@ INSERT INTO roles (id, name) VALUES
 
 ### Gateway Tracking Tables
 
-The gateway creates internal tables with `_stonescriptdb_gateway_` prefix:
+The gateway creates internal tables with `_stonescriptdb_gateway_` prefix **in each database**:
 
 | Table | Purpose |
 |-------|---------|
 | `_stonescriptdb_gateway_migrations` | Track applied migrations (filename + checksum) |
-| `_stonescriptdb_gateway_functions` | Track deployed functions (signature + checksum) |
 | `_stonescriptdb_gateway_types` | Track deployed custom types (name + checksum) |
+| `_stonescriptdb_gateway_tables` | Track deployed tables (name + checksum) |
+| `_stonescriptdb_gateway_functions` | Track deployed functions (signature + checksum) |
+| `_stonescriptdb_gateway_changelog` | Audit trail of all schema changes (migrations, functions, types, tables) |
 
-These are excluded from schema diff comparisons.
+**How it works:**
+- Each database gets its own tracking tables (not shared across platforms)
+- Checksums are used to detect changes and skip re-deploying unchanged items
+- On `/register` or `/migrate`, the gateway compares incoming checksums with stored checksums
+- Only changed items are re-deployed (e.g., 75 unchanged functions = 75 skipped)
+- The `_changelog` table records all changes with timestamps for auditing
+- These tables are excluded from schema diff comparisons
+
+**Platform registry (v2 API):**
+- The `/platforms` endpoint reads from a **file-based registry** (`data_dir/<platform>/platform.json`)
+- This is separate from per-database tracking tables
+- Used for managing registered platforms, schemas, and databases
 
 ## StoneScriptPHP Integration
 

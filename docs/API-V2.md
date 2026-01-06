@@ -13,22 +13,22 @@ Multi-tenant schema registry with stored schemas. This API allows platforms to r
 # 1. Register your platform
 curl -X POST http://<VM_IP>:9000/platform/register \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp"}'
+  -d '{"platform": "myapp"}'
 
 # 2. Upload schemas (main_db, tenant_db, etc.)
-curl -X POST http://<VM_IP>:9000/platform/medstoreapp/schema \
+curl -X POST http://<VM_IP>:9000/platform/myapp/schema \
   -F "schema_name=tenant_db" \
   -F "schema=@tenant_db.tar.gz"
 
 # 3. Create databases on demand
 curl -X POST http://<VM_IP>:9000/database/create \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_001"}'
+  -d '{"platform": "myapp", "schema_name": "tenant_db", "database_id": "store_001"}'
 
 # 4. Migrate all databases of a schema type
 curl -X POST http://<VM_IP>:9000/v2/migrate \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "tenant_db"}'
+  -d '{"platform": "myapp", "schema_name": "tenant_db"}'
 ```
 
 ---
@@ -49,9 +49,9 @@ Day 1: Platform Registration
 
 Day 2+: Creating Tenants
 ┌──────────────────┐
-│  Create DB from  │────▶  medstoreapp_tenant_db_store_001
-│  tenant_db       │────▶  medstoreapp_tenant_db_store_002
-│  schema          │────▶  medstoreapp_tenant_db_store_003
+│  Create DB from  │────▶  myapp_tenant_db_store_001
+│  tenant_db       │────▶  myapp_tenant_db_store_002
+│  schema          │────▶  myapp_tenant_db_store_003
 └──────────────────┘
 
 Week 5: Add New Schema Type
@@ -70,7 +70,7 @@ Schemas are stored on the gateway server:
 
 ```
 {DATA_DIR}/
-├── medstoreapp/
+├── myapp/
 │   ├── platform.json           # Platform metadata
 │   ├── main_db/
 │   │   ├── extensions/
@@ -105,7 +105,7 @@ Register a new platform. **No schema required** - you can add schemas later.
 **Request:**
 ```json
 {
-  "platform": "medstoreapp"
+  "platform": "myapp"
 }
 ```
 
@@ -113,7 +113,7 @@ Register a new platform. **No schema required** - you can add schemas later.
 ```json
 {
   "status": "registered",
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "message": "Platform registered. Use POST /platform/{platform}/schema to add schemas."
 }
 ```
@@ -122,7 +122,7 @@ Register a new platform. **No schema required** - you can add schemas later.
 ```json
 {
   "error": "invalid_request",
-  "message": "Platform 'medstoreapp' is already registered"
+  "message": "Platform 'myapp' is already registered"
 }
 ```
 
@@ -142,7 +142,7 @@ Upload a schema for a registered platform. The schema is extracted and stored fo
 tar -czf tenant_db.tar.gz -C src/postgresql .
 
 # Upload to gateway
-curl -X POST http://<VM_IP>:9000/platform/medstoreapp/schema \
+curl -X POST http://<VM_IP>:9000/platform/myapp/schema \
   -F "schema_name=tenant_db" \
   -F "schema=@tenant_db.tar.gz"
 ```
@@ -151,7 +151,7 @@ curl -X POST http://<VM_IP>:9000/platform/medstoreapp/schema \
 ```json
 {
   "status": "registered",
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schema_name": "tenant_db",
   "has_tables": true,
   "has_functions": true,
@@ -188,7 +188,7 @@ List all registered schemas for a platform.
 **Response:**
 ```json
 {
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schemas": [
     {
       "name": "main_db",
@@ -221,26 +221,26 @@ List all databases created for a platform. Optional filter by schema.
 **Examples:**
 ```bash
 # List all databases
-curl http://<VM_IP>:9000/platform/medstoreapp/databases
+curl http://<VM_IP>:9000/platform/myapp/databases
 
 # Filter by schema
-curl "http://<VM_IP>:9000/platform/medstoreapp/databases?schema=tenant_db"
+curl "http://<VM_IP>:9000/platform/myapp/databases?schema=tenant_db"
 ```
 
 **Response:**
 ```json
 {
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "databases": [
     {
       "id": "main",
-      "database_name": "medstoreapp_main_db_main",
+      "database_name": "myapp_main_db_main",
       "schema_name": "main_db",
       "created_at": "2024-01-15T10:30:00Z"
     },
     {
       "id": "store_001",
-      "database_name": "medstoreapp_tenant_db_store_001",
+      "database_name": "myapp_tenant_db_store_001",
       "schema_name": "tenant_db",
       "created_at": "2024-01-15T11:00:00Z"
     }
@@ -260,7 +260,7 @@ List all registered platforms.
 {
   "platforms": [
     {
-      "name": "medstoreapp",
+      "name": "myapp",
       "schemas": 2,
       "databases": 5
     },
@@ -283,22 +283,22 @@ Create a new database from a stored schema.
 **Request:**
 ```json
 {
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schema_name": "tenant_db",
   "database_id": "store_001"
 }
 ```
 
 **Database naming:** `{platform}_{schema_name}_{database_id}`
-- Example: `medstoreapp_tenant_db_store_001`
+- Example: `myapp_tenant_db_store_001`
 
 **Response (201 Created):**
 ```json
 {
   "status": "created",
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schema_name": "tenant_db",
-  "database_name": "medstoreapp_tenant_db_store_001",
+  "database_name": "myapp_tenant_db_store_001",
   "extensions_installed": 2,
   "types_deployed": 3,
   "tables_created": 15,
@@ -314,7 +314,7 @@ Create a new database from a stored schema.
 ```json
 {
   "error": "database_already_exists",
-  "database": "medstoreapp_tenant_db_store_001"
+  "database": "myapp_tenant_db_store_001"
 }
 ```
 
@@ -327,7 +327,7 @@ Migrate databases using stored schemas. Can migrate a single database or all dat
 **Request - Migrate all databases of a schema type:**
 ```json
 {
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schema_name": "tenant_db"
 }
 ```
@@ -335,7 +335,7 @@ Migrate databases using stored schemas. Can migrate a single database or all dat
 **Request - Migrate single database:**
 ```json
 {
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schema_name": "tenant_db",
   "database_id": "store_001"
 }
@@ -344,7 +344,7 @@ Migrate databases using stored schemas. Can migrate a single database or all dat
 **Request - Force mode (bypass data loss checks):**
 ```json
 {
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schema_name": "tenant_db",
   "force": true
 }
@@ -354,12 +354,12 @@ Migrate databases using stored schemas. Can migrate a single database or all dat
 ```json
 {
   "status": "completed",
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "schema_name": "tenant_db",
   "databases_updated": [
-    "medstoreapp_tenant_db_store_001",
-    "medstoreapp_tenant_db_store_002",
-    "medstoreapp_tenant_db_store_003"
+    "myapp_tenant_db_store_001",
+    "myapp_tenant_db_store_002",
+    "myapp_tenant_db_store_003"
   ],
   "migrations_applied": 2,
   "functions_updated": 5,
@@ -389,7 +389,7 @@ Migrate databases using stored schemas. Can migrate a single database or all dat
 In your platform's `.env`:
 ```env
 DB_GATEWAY_URL=http://<VM_IP>:9000
-PLATFORM_ID=medstoreapp
+PLATFORM_ID=myapp
 ```
 
 ### Artisan Commands
@@ -553,22 +553,22 @@ public function boot()
 # 1. Register platform
 curl -X POST http://<VM_IP>:9000/platform/register \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp"}'
+  -d '{"platform": "myapp"}'
 
 # 2. Upload main_db schema
-curl -X POST http://<VM_IP>:9000/platform/medstoreapp/schema \
+curl -X POST http://<VM_IP>:9000/platform/myapp/schema \
   -F "schema_name=main_db" \
   -F "schema=@main_db.tar.gz"
 
 # 3. Upload tenant_db schema
-curl -X POST http://<VM_IP>:9000/platform/medstoreapp/schema \
+curl -X POST http://<VM_IP>:9000/platform/myapp/schema \
   -F "schema_name=tenant_db" \
   -F "schema=@tenant_db.tar.gz"
 
 # 4. Create main database
 curl -X POST http://<VM_IP>:9000/database/create \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "main_db", "database_id": "main"}'
+  -d '{"platform": "myapp", "schema_name": "main_db", "database_id": "main"}'
 ```
 
 ### Example 2: Creating Tenant Databases
@@ -577,43 +577,43 @@ curl -X POST http://<VM_IP>:9000/database/create \
 # Create databases for new stores
 curl -X POST http://<VM_IP>:9000/database/create \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_mumbai"}'
+  -d '{"platform": "myapp", "schema_name": "tenant_db", "database_id": "store_mumbai"}'
 
 curl -X POST http://<VM_IP>:9000/database/create \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_delhi"}'
+  -d '{"platform": "myapp", "schema_name": "tenant_db", "database_id": "store_delhi"}'
 
 curl -X POST http://<VM_IP>:9000/database/create \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "tenant_db", "database_id": "store_bangalore"}'
+  -d '{"platform": "myapp", "schema_name": "tenant_db", "database_id": "store_bangalore"}'
 ```
 
 ### Example 3: Schema Update & Migration
 
 ```bash
 # 1. Update schema (e.g., new migration added)
-curl -X POST http://<VM_IP>:9000/platform/medstoreapp/schema \
+curl -X POST http://<VM_IP>:9000/platform/myapp/schema \
   -F "schema_name=tenant_db" \
   -F "schema=@tenant_db.tar.gz"
 
 # 2. Migrate ALL tenant databases
 curl -X POST http://<VM_IP>:9000/v2/migrate \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "tenant_db"}'
+  -d '{"platform": "myapp", "schema_name": "tenant_db"}'
 ```
 
 ### Example 4: Adding New Schema Type Later
 
 ```bash
 # Week 5: Add analytics schema
-curl -X POST http://<VM_IP>:9000/platform/medstoreapp/schema \
+curl -X POST http://<VM_IP>:9000/platform/myapp/schema \
   -F "schema_name=analytics_db" \
   -F "schema=@analytics_db.tar.gz"
 
 # Create analytics database
 curl -X POST http://<VM_IP>:9000/database/create \
   -H "Content-Type: application/json" \
-  -d '{"platform": "medstoreapp", "schema_name": "analytics_db", "database_id": "main"}'
+  -d '{"platform": "myapp", "schema_name": "analytics_db", "database_id": "main"}'
 ```
 
 ---

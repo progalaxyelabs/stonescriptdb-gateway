@@ -10,7 +10,7 @@
 #
 # Environment variables (required):
 #   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
-#   PLATFORM_ID       - Platform identifier (e.g., medstoreapp)
+#   PLATFORM_ID       - Platform identifier (e.g., myapp)
 #
 # Environment variables (optional):
 #   TENANT_ID         - Tenant identifier (omit for main DB)
@@ -18,7 +18,7 @@
 #   CACHE_DIR         - Temp directory for tar files (default: ./.cache)
 #
 # Example:
-#   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=btechrecruiter ./register-with-gateway.sh
+#   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myplatform ./register-with-gateway.sh
 # =============================================================================
 
 set -e

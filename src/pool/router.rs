@@ -7,8 +7,8 @@ impl DatabaseRouter {
     }
 
     /// Generate database name from platform and optional tenant_id
-    /// - Main DB: `{platform}_main` (e.g., `medstoreapp_main`)
-    /// - Tenant DB: `{platform}_{tenant_id}` (e.g., `medstoreapp_clinic_001`)
+    /// - Main DB: `{platform}_main` (e.g., `myapp_main`)
+    /// - Tenant DB: `{platform}_{tenant_id}` (e.g., `myapp_clinic_001`)
     pub fn database_name(&self, platform: &str, tenant_id: Option<&str>) -> String {
         let sanitized_platform = sanitize_identifier(platform);
 
@@ -24,8 +24,8 @@ impl DatabaseRouter {
     /// Extract platform from database name
     pub fn platform_from_database(&self, db_name: &str) -> Option<String> {
         // Split on _ and take everything before the last segment
-        // e.g., "medstoreapp_clinic_001" -> "medstoreapp"
-        // e.g., "medstoreapp_main" -> "medstoreapp"
+        // e.g., "myapp_clinic_001" -> "myapp"
+        // e.g., "myapp_main" -> "myapp"
         let parts: Vec<&str> = db_name.split('_').collect();
         if parts.len() >= 2 {
             // The last part is either "main" or the tenant suffix
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn test_database_name_main() {
         let router = DatabaseRouter::new();
-        assert_eq!(router.database_name("medstoreapp", None), "medstoreapp_main");
+        assert_eq!(router.database_name("myapp", None), "myapp_main");
         assert_eq!(router.database_name("institute-app", None), "institute_app_main");
     }
 
@@ -120,46 +120,46 @@ mod tests {
     fn test_database_name_tenant() {
         let router = DatabaseRouter::new();
         assert_eq!(
-            router.database_name("medstoreapp", Some("clinic_001")),
-            "medstoreapp_clinic_001"
+            router.database_name("myapp", Some("clinic_001")),
+            "myapp_clinic_001"
         );
         assert_eq!(
-            router.database_name("medstoreapp", Some("clinic-002")),
-            "medstoreapp_clinic_002"
+            router.database_name("myapp", Some("clinic-002")),
+            "myapp_clinic_002"
         );
     }
 
     #[test]
     fn test_belongs_to_platform() {
         let router = DatabaseRouter::new();
-        assert!(router.belongs_to_platform("medstoreapp_main", "medstoreapp"));
-        assert!(router.belongs_to_platform("medstoreapp_clinic_001", "medstoreapp"));
-        assert!(!router.belongs_to_platform("instituteapp_main", "medstoreapp"));
+        assert!(router.belongs_to_platform("myapp_main", "myapp"));
+        assert!(router.belongs_to_platform("myapp_clinic_001", "myapp"));
+        assert!(!router.belongs_to_platform("platformb_main", "myapp"));
     }
 
     #[test]
     fn test_is_main_database() {
         let router = DatabaseRouter::new();
-        assert!(router.is_main_database("medstoreapp_main"));
-        assert!(!router.is_main_database("medstoreapp_clinic_001"));
+        assert!(router.is_main_database("myapp_main"));
+        assert!(!router.is_main_database("myapp_clinic_001"));
     }
 
     #[test]
     fn test_tenant_id_from_database() {
         let router = DatabaseRouter::new();
         assert_eq!(
-            router.tenant_id_from_database("medstoreapp_clinic_001", "medstoreapp"),
+            router.tenant_id_from_database("myapp_clinic_001", "myapp"),
             Some("clinic_001".to_string())
         );
         assert_eq!(
-            router.tenant_id_from_database("medstoreapp_main", "medstoreapp"),
+            router.tenant_id_from_database("myapp_main", "myapp"),
             None
         );
     }
 
     #[test]
     fn test_sanitize_identifier() {
-        assert_eq!(sanitize_identifier("MedStoreApp"), "medstoreapp");
+        assert_eq!(sanitize_identifier("MedStoreApp"), "myapp");
         assert_eq!(sanitize_identifier("clinic-001"), "clinic_001");
         assert_eq!(sanitize_identifier("test app"), "test_app");
         assert_eq!(sanitize_identifier("__test__"), "test");

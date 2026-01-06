@@ -414,8 +414,8 @@ mod tests {
 
     #[test]
     fn test_valid_identifier() {
-        assert!(is_valid_identifier("medstoreapp_main"));
-        assert!(is_valid_identifier("medstoreapp_clinic_001"));
+        assert!(is_valid_identifier("myapp_main"));
+        assert!(is_valid_identifier("myapp_clinic_001"));
         assert!(is_valid_identifier("_test"));
 
         assert!(!is_valid_identifier("")); // Empty

@@ -66,7 +66,7 @@ impl Config {
             .unwrap_or(3600);
 
         let allowed_networks_str =
-            env::var("ALLOWED_NETWORKS").unwrap_or_else(|_| "127.0.0.0/8,::1/128,10.0.1.0/24".to_string());
+            env::var("ALLOWED_NETWORKS").unwrap_or_else(|_| "127.0.0.0/8,::1/128,192.168.0.0/16".to_string());
 
         let allowed_networks = allowed_networks_str
             .split(',')
@@ -88,7 +88,7 @@ impl Config {
         let admin_token = env::var("ADMIN_TOKEN").ok();
 
         let allowed_admin_ips_str = env::var("ALLOWED_ADMIN_IPS")
-            .unwrap_or_else(|_| "10.0.1.0/24".to_string());
+            .unwrap_or_else(|_| "192.168.0.0/16".to_string());
 
         let allowed_admin_ips = allowed_admin_ips_str
             .split(',')

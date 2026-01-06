@@ -168,16 +168,16 @@ stonescriptdb-gateway/
 
 ## 🔗 External Resources
 
-- **GitHub Repository:** https://github.com/progalaxyelabs/stonescriptdb-gateway
-- **Issue Tracker:** https://github.com/progalaxyelabs/stonescriptdb-gateway/issues
-- **Releases:** https://github.com/progalaxyelabs/stonescriptdb-gateway/releases
+- **GitHub Repository:** https://github.com/YOUR-ORG/stonescriptdb-gateway
+- **Issue Tracker:** https://github.com/YOUR-ORG/stonescriptdb-gateway/issues
+- **Releases:** https://github.com/YOUR-ORG/stonescriptdb-gateway/releases
 - **License:** MIT
 
 ---
 
 ## 📞 Getting Help
 
-- **Found a bug?** [Open an issue](https://github.com/progalaxyelabs/stonescriptdb-gateway/issues)
+- **Found a bug?** [Open an issue](https://github.com/YOUR-ORG/stonescriptdb-gateway/issues)
 - **Have a question?** Check [Troubleshooting](INTEGRATION.md#troubleshooting) first
 - **Want to contribute?** Read [HLD](../HLD.md) and [Declarative Schema Design](DECLARATIVE_SCHEMA_PROPOSAL.md)
 

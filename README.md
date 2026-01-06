@@ -1,7 +1,7 @@
 # StoneScript DB Gateway
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/progalaxyelabs/stonescriptdb-gateway)](https://github.com/progalaxyelabs/stonescriptdb-gateway/releases)
+[![GitHub release](https://img.shields.io/github/v/release/YOUR-ORG/stonescriptdb-gateway)](https://github.com/YOUR-ORG/stonescriptdb-gateway/releases)
 
 Rust-based multi-tenant database gateway and schema orchestrator for PostgreSQL function-based platforms.
 
@@ -49,7 +49,7 @@ The gateway is designed to run in a dedicated VM alongside PostgreSQL, separate 
 
 ```bash
 # On the VM:
-git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
+git clone https://github.com/YOUR-ORG/stonescriptdb-gateway.git
 cd stonescriptdb-gateway
 git checkout v1.0.0
 
@@ -84,7 +84,7 @@ For local development and testing, you can run the gateway directly:
 
 ```bash
 # Clone
-git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
+git clone https://github.com/YOUR-ORG/stonescriptdb-gateway.git
 cd stonescriptdb-gateway
 
 # Setup
@@ -201,7 +201,7 @@ sudo systemctl restart stonescriptdb-gateway
 
 ```bash
 # Clone
-git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
+git clone https://github.com/YOUR-ORG/stonescriptdb-gateway.git
 cd stonescriptdb-gateway
 
 # Setup
@@ -269,7 +269,7 @@ GATEWAY_PORT=9000
 MAX_CONNECTIONS_PER_POOL=10
 MAX_TOTAL_CONNECTIONS=200
 POOL_IDLE_TIMEOUT_SECS=1800
-ALLOWED_NETWORKS=127.0.0.0/8,192.168.122.0/24
+ALLOWED_NETWORKS=127.0.0.0/8,192.168.1.100/24
 RUST_LOG=info
 ```
 
@@ -510,9 +510,9 @@ GATEWAY_URL=http://localhost:9000 ./tests/run-tests.sh
 
 ## Links
 
-- **GitHub:** https://github.com/progalaxyelabs/stonescriptdb-gateway
-- **Issues:** https://github.com/progalaxyelabs/stonescriptdb-gateway/issues
-- **Releases:** https://github.com/progalaxyelabs/stonescriptdb-gateway/releases
+- **GitHub:** https://github.com/YOUR-ORG/stonescriptdb-gateway
+- **Issues:** https://github.com/YOUR-ORG/stonescriptdb-gateway/issues
+- **Releases:** https://github.com/YOUR-ORG/stonescriptdb-gateway/releases
 
 ## License
 

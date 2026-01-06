@@ -145,16 +145,16 @@ mod tests {
 
     #[test]
     fn test_vnet_allowed() {
-        let allowed = vec![IpNetwork::from_str("10.0.1.0/24").unwrap()];
-        assert!(is_allowed(&allowed, "10.0.1.5".parse().unwrap()));
-        assert!(is_allowed(&allowed, "10.0.1.254".parse().unwrap()));
+        let allowed = vec![IpNetwork::from_str("192.168.1.0/24").unwrap()];
+        assert!(is_allowed(&allowed, "192.168.1.5".parse().unwrap()));
+        assert!(is_allowed(&allowed, "192.168.1.254".parse().unwrap()));
         assert!(!is_allowed(&allowed, "10.0.2.1".parse().unwrap()));
         assert!(!is_allowed(&allowed, "192.168.1.1".parse().unwrap()));
     }
 
     #[test]
     fn test_external_ip_denied() {
-        let allowed = vec![IpNetwork::from_str("10.0.1.0/24").unwrap()];
+        let allowed = vec![IpNetwork::from_str("192.168.1.0/24").unwrap()];
         assert!(!is_allowed(&allowed, "8.8.8.8".parse().unwrap()));
         assert!(!is_allowed(&allowed, "1.1.1.1".parse().unwrap()));
     }

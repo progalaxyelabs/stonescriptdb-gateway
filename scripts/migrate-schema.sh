@@ -10,7 +10,7 @@
 #
 # Environment variables (required):
 #   DB_GATEWAY_URL    - Gateway URL (e.g., http://localhost:9000)
-#   PLATFORM_ID       - Platform identifier (e.g., medstoreapp)
+#   PLATFORM_ID       - Platform identifier (e.g., myapp)
 #
 # Environment variables (optional):
 #   TENANT_ID         - Specific tenant (omit to migrate ALL tenants)
@@ -19,10 +19,10 @@
 #
 # Example:
 #   # Migrate all tenants
-#   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=medstoreapp ./migrate-schema.sh
+#   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp ./migrate-schema.sh
 #
 #   # Migrate specific tenant
-#   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=medstoreapp TENANT_ID=clinic_001 ./migrate-schema.sh
+#   DB_GATEWAY_URL=http://localhost:9000 PLATFORM_ID=myapp TENANT_ID=clinic_001 ./migrate-schema.sh
 # =============================================================================
 
 set -e

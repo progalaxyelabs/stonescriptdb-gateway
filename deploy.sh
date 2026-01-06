@@ -8,8 +8,8 @@
 #   ./deploy.sh [TARGET]
 #
 # Targets:
-#   devvmlocal   - Deploy to development VM (default)
-#   production   - Deploy to production server
+#   dev   - Deploy to development server (default)
+#   prod  - Deploy to production server
 # =============================================================================
 
 set -e
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Configuration
-TARGET=${1:-devvmlocal}
+TARGET=${1:-dev}
 BINARY_SOURCE="target/release/stonescriptdb-gateway"
 BINARY_DEST="/usr/local/bin/stonescriptdb-gateway"
 SERVICE_NAME="stonescriptdb-gateway"

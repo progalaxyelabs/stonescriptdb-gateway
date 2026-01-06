@@ -1,6 +1,6 @@
 [Unit]
 Description=StoneScriptDB Gateway - Multi-tenant PostgreSQL Proxy
-Documentation=https://bitbucket.org/progalaxyelabs/stonescriptdb-gateway
+Documentation=https://github.com/YOUR-ORG/stonescriptdb-gateway
 After=network.target postgresql.service
 Requires=network.target
 

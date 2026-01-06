@@ -541,5 +541,5 @@ curl http://<VM_IP>:9000/health
 ---
 
 **Questions or Issues?**
-- GitHub: https://github.com/progalaxyelabs/stonescriptdb-gateway/issues
-- Documentation: https://github.com/progalaxyelabs/stonescriptdb-gateway
+- GitHub: https://github.com/YOUR-ORG/stonescriptdb-gateway/issues
+- Documentation: https://github.com/YOUR-ORG/stonescriptdb-gateway

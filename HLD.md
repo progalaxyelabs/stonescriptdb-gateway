@@ -75,11 +75,11 @@ A single Rust service that:
 │  │                    PostgreSQL 16 (port 5432)                       │  │
 │  │                                                                    │  │
 │  │  platform_main databases:                                          │  │
-│  │    medstoreapp_main, instituteapp_main, progalaxy_main, ...       │  │
+│  │    myapp_main, platformb_main, platformc_main, ...       │  │
 │  │                                                                    │  │
 │  │  tenant databases:                                                 │  │
-│  │    medstoreapp_clinic_001, medstoreapp_clinic_002, ...            │  │
-│  │    instituteapp_school_001, instituteapp_school_002, ...          │  │
+│  │    myapp_tenant_001, myapp_tenant_002, ...            │  │
+│  │    platformb_school_001, platformb_school_002, ...          │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -90,11 +90,11 @@ The gateway runs in a dedicated VM alongside PostgreSQL, separate from the Docke
 
 ```
 DEV Environment:
-  Docker containers on host (rootless) → VM IP (e.g., 192.168.122.10:9000)
+  Docker containers on host (rootless) → VM IP (e.g., 192.168.1.100:9000)
   Gateway on VM → localhost:5432 (PostgreSQL on same VM)
 
 PROD Environment:
-  Platform containers (Docker Swarm) → VM IP (e.g., 10.0.1.6:9000)
+  Platform containers (Docker Swarm) → VM IP (e.g., 192.168.1.10:9000)
   Gateway on VM → localhost:5432 (PostgreSQL on same VM)
 ```
 
@@ -118,8 +118,8 @@ Container startup - creates DB if needed, runs migrations, deploys functions.
 POST /register
 Content-Type: multipart/form-data
 
-platform: medstoreapp
-tenant_id: clinic_001    (optional, null = main DB)
+platform: myapp
+tenant_id: tenant_001    (optional, null = main DB)
 schema: <postgresql.tar.gz>
 ```
 
@@ -127,7 +127,7 @@ schema: <postgresql.tar.gz>
 ```json
 {
   "status": "ready",
-  "database": "medstoreapp_clinic_001",
+  "database": "myapp_tenant_001",
   "migrations_applied": 3,
   "functions_deployed": 76,
   "execution_time_ms": 1250
@@ -160,8 +160,8 @@ Hot update - deploy new schema without container restart.
 POST /migrate
 Content-Type: multipart/form-data
 
-platform: medstoreapp
-tenant_id: clinic_001    (optional, null = ALL tenant DBs for this platform)
+platform: myapp
+tenant_id: tenant_001    (optional, null = ALL tenant DBs for this platform)
 schema: <postgresql.tar.gz>
 ```
 
@@ -170,9 +170,9 @@ schema: <postgresql.tar.gz>
 {
   "status": "completed",
   "databases_updated": [
-    "medstoreapp_main",
-    "medstoreapp_clinic_001",
-    "medstoreapp_clinic_002"
+    "myapp_main",
+    "myapp_tenant_001",
+    "myapp_tenant_002"
   ],
   "migrations_applied": 1,
   "functions_updated": 76,
@@ -187,8 +187,8 @@ Execute a database function.
 **Request:**
 ```json
 {
-  "platform": "medstoreapp",
-  "tenant_id": "clinic_001",
+  "platform": "myapp",
+  "tenant_id": "tenant_001",
   "function": "get_patient_by_id",
   "params": [123]
 }
@@ -228,17 +228,17 @@ List all databases for a platform.
 
 **Request:**
 ```
-GET /admin/databases?platform=medstoreapp
+GET /admin/databases?platform=myapp
 ```
 
 **Response (200):**
 ```json
 {
-  "platform": "medstoreapp",
+  "platform": "myapp",
   "databases": [
-    {"name": "medstoreapp_main", "type": "main", "size_mb": 125},
-    {"name": "medstoreapp_clinic_001", "type": "tenant", "size_mb": 45},
-    {"name": "medstoreapp_clinic_002", "type": "tenant", "size_mb": 32}
+    {"name": "myapp_main", "type": "main", "size_mb": 125},
+    {"name": "myapp_tenant_001", "type": "tenant", "size_mb": 45},
+    {"name": "myapp_tenant_002", "type": "tenant", "size_mb": 32}
   ],
   "count": 3
 }
@@ -251,8 +251,8 @@ Create a new tenant database.
 **Request:**
 ```json
 {
-  "platform": "medstoreapp",
-  "tenant_id": "clinic_042"
+  "platform": "myapp",
+  "tenant_id": "tenant_042"
 }
 ```
 
@@ -260,7 +260,7 @@ Create a new tenant database.
 ```json
 {
   "status": "created",
-  "database": "medstoreapp_clinic_042",
+  "database": "myapp_tenant_042",
   "message": "Database created. Run /register or /migrate to deploy schema."
 }
 ```
@@ -278,7 +278,7 @@ fn is_allowed(ip: IpAddr) -> bool {
         IpAddr::V4(v4) if v4.is_loopback() => true,
         IpAddr::V6(v6) if v6.is_loopback() => true,
 
-        // Azure VNet (prod): 10.0.1.0/24
+        // private network (prod): 192.168.1.10/24
         IpAddr::V4(v4) => {
             let octets = v4.octets();
             octets[0] == 10 && octets[1] == 0 && octets[2] == 1
@@ -293,7 +293,7 @@ fn is_allowed(ip: IpAddr) -> bool {
 
 - Platforms can only access their own databases
 - Platform name extracted from request, validated against database prefix
-- Cannot query `instituteapp_*` databases with `platform: medstoreapp`
+- Cannot query `platformb_*` databases with `platform: myapp`
 
 ## 5. Schema Management
 
@@ -469,7 +469,7 @@ MAX_TOTAL_CONNECTIONS=200
 POOL_IDLE_TIMEOUT_SECS=1800
 
 # Security
-ALLOWED_NETWORKS=127.0.0.0/8,10.0.1.0/24
+ALLOWED_NETWORKS=127.0.0.0/8,192.168.1.10/24
 
 # Logging
 RUST_LOG=info
@@ -538,8 +538,8 @@ class Database {
 
 | Type | Pattern | Example |
 |------|---------|---------|
-| Main DB | `{platform}_main` | `medstoreapp_main` |
-| Tenant DB | `{platform}_{tenant_id}` | `medstoreapp_clinic_001` |
+| Main DB | `{platform}_main` | `myapp_main` |
+| Tenant DB | `{platform}_{tenant_id}` | `myapp_tenant_001` |
 
 ## 11. Error Handling
 
@@ -564,7 +564,7 @@ enum GatewayError {
 {
   "error": "migration_failed",
   "message": "Migration 003_add_audit_log.pssql failed",
-  "database": "medstoreapp_clinic_001",
+  "database": "myapp_tenant_001",
   "cause": "relation 'audit_log' already exists"
 }
 ```

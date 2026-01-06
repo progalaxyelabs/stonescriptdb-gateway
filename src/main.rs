@@ -14,7 +14,8 @@ use crate::api::{
 };
 use crate::config::Config;
 use crate::pool::PoolManager;
-use crate::security::IpFilterLayer;
+use crate::schema::AuditLogger;
+use crate::security::{admin_auth_middleware, AdminAuthConfig, IpFilterLayer};
 
 use axum::{
     routing::{get, post},
@@ -86,6 +87,15 @@ async fn main() -> anyhow::Result<()> {
     // Create pool manager
     let pool_manager = Arc::new(PoolManager::new(config.clone()).await?);
 
+    // Initialize audit logging table in postgres database
+    info!("Initializing audit logging table...");
+    let postgres_pool = pool_manager.get_pool_by_name("postgres").await?;
+    if let Err(e) = AuditLogger::ensure_audit_table(&postgres_pool).await {
+        warn!("Failed to create audit table (will retry on first use): {}", e);
+    } else {
+        info!("Audit logging table initialized successfully");
+    }
+
     // Create platform state for schema registry
     let platform_state = Arc::new(PlatformState::new(&config.data_dir));
 
@@ -107,6 +117,39 @@ async fn main() -> anyhow::Result<()> {
     // Create IP filter middleware
     let ip_filter = IpFilterLayer::new(config.allowed_networks.clone());
 
+    // Create admin auth config
+    let admin_auth_config = Arc::new(AdminAuthConfig::new(
+        config.admin_token.clone(),
+        config.allowed_admin_ips.clone(),
+    ));
+
+    // Log admin endpoint status
+    if admin_auth_config.is_enabled() {
+        info!("Admin endpoints enabled with token authentication");
+        info!("Allowed admin IPs: {:?}", config.allowed_admin_ips);
+    } else {
+        warn!("Admin endpoints DISABLED - ADMIN_TOKEN not configured");
+    }
+
+    // Build admin routes (protected by admin auth middleware)
+    // Note: Different admin endpoints need different state types
+    let admin_platforms_routes = Router::new()
+        .route("/platforms", get(list_platforms))
+        .with_state(platform_state.clone())
+        .layer(axum::middleware::from_fn_with_state(
+            admin_auth_config.clone(),
+            admin_auth_middleware,
+        ));
+
+    let admin_db_routes = Router::new()
+        .route("/databases", get(admin_list_databases))
+        .route("/create-tenant", post(admin_create_tenant))
+        .with_state((pool_manager.clone(), start_time))
+        .layer(axum::middleware::from_fn_with_state(
+            admin_auth_config.clone(),
+            admin_auth_middleware,
+        ));
+
     // Build router with legacy and new endpoints
     let app = Router::new()
         // Health check (no IP filter - for load balancer)
@@ -115,8 +158,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/register", post(register_schema))
         .route("/migrate", post(migrate_schema))
         .route("/call", post(call_function))
-        .route("/admin/databases", get(admin_list_databases))
-        .route("/admin/create-tenant", post(admin_create_tenant))
         .layer(ip_filter.clone())
         .layer(TraceLayer::new_for_http())
         .with_state((pool_manager.clone(), start_time))
@@ -131,7 +172,9 @@ async fn main() -> anyhow::Result<()> {
                 .layer(ip_filter.clone())
                 .with_state(platform_state.clone()),
         )
-        .route("/platforms", get(list_platforms).with_state(platform_state.clone()))
+        // Admin endpoints (protected by admin auth + IP filter)
+        .nest("/admin", admin_platforms_routes)
+        .nest("/admin", admin_db_routes)
         // New database creation endpoint
         .route(
             "/database/create",

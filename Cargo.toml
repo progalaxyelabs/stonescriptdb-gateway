@@ -1,6 +1,6 @@
 [package]
 name = "stonescriptdb-gateway"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "Multi-tenant PostgreSQL database gateway and schema orchestrator for StoneScript platforms"
 authors = ["Progalaxy E-Labs"]

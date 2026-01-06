@@ -47,18 +47,18 @@ impl TypeChecker {
         // INTEGER TYPES - Widening is safe, narrowing may overflow
         // ═══════════════════════════════════════════════════════════════
 
-        // SMALLINT (int2) -> larger types
-        safe_widenings.insert("SMALLINT", vec!["INTEGER", "INT", "INT4", "BIGINT", "INT8", "NUMERIC", "DECIMAL", "REAL", "FLOAT4", "DOUBLE PRECISION", "FLOAT8"]);
-        safe_widenings.insert("INT2", vec!["INTEGER", "INT", "INT4", "BIGINT", "INT8", "NUMERIC", "DECIMAL", "REAL", "FLOAT4", "DOUBLE PRECISION", "FLOAT8"]);
+        // SMALLINT (int2) -> larger types and SMALLSERIAL (adds auto-increment)
+        safe_widenings.insert("SMALLINT", vec!["SMALLSERIAL", "INTEGER", "INT", "INT4", "BIGINT", "INT8", "NUMERIC", "DECIMAL", "REAL", "FLOAT4", "DOUBLE PRECISION", "FLOAT8"]);
+        safe_widenings.insert("INT2", vec!["SMALLSERIAL", "INTEGER", "INT", "INT4", "BIGINT", "INT8", "NUMERIC", "DECIMAL", "REAL", "FLOAT4", "DOUBLE PRECISION", "FLOAT8"]);
 
-        // INTEGER (int4) -> larger types
-        safe_widenings.insert("INTEGER", vec!["BIGINT", "INT8", "NUMERIC", "DECIMAL", "DOUBLE PRECISION", "FLOAT8"]);
-        safe_widenings.insert("INT", vec!["BIGINT", "INT8", "NUMERIC", "DECIMAL", "DOUBLE PRECISION", "FLOAT8"]);
-        safe_widenings.insert("INT4", vec!["BIGINT", "INT8", "NUMERIC", "DECIMAL", "DOUBLE PRECISION", "FLOAT8"]);
+        // INTEGER (int4) -> larger types and SERIAL (adds auto-increment)
+        safe_widenings.insert("INTEGER", vec!["SERIAL", "BIGINT", "INT8", "NUMERIC", "DECIMAL", "DOUBLE PRECISION", "FLOAT8"]);
+        safe_widenings.insert("INT", vec!["SERIAL", "BIGINT", "INT8", "NUMERIC", "DECIMAL", "DOUBLE PRECISION", "FLOAT8"]);
+        safe_widenings.insert("INT4", vec!["SERIAL", "BIGINT", "INT8", "NUMERIC", "DECIMAL", "DOUBLE PRECISION", "FLOAT8"]);
 
-        // BIGINT -> numeric types
-        safe_widenings.insert("BIGINT", vec!["NUMERIC", "DECIMAL"]);
-        safe_widenings.insert("INT8", vec!["NUMERIC", "DECIMAL"]);
+        // BIGINT -> numeric types and BIGSERIAL (adds auto-increment)
+        safe_widenings.insert("BIGINT", vec!["BIGSERIAL", "NUMERIC", "DECIMAL"]);
+        safe_widenings.insert("INT8", vec!["BIGSERIAL", "NUMERIC", "DECIMAL"]);
 
         // Integer narrowing = DATALOSS
         dataloss_narrowings.insert(("BIGINT", "INTEGER"), "May overflow: BIGINT max 9.2e18, INTEGER max 2.1e9");

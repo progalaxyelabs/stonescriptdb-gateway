@@ -80,6 +80,12 @@ impl VerificationResult {
             log.push_str("MISSING SEEDER RECORDS:\n");
             for s in &self.seeders.missing {
                 log.push_str(&format!("  - {} ({} missing records)\n", s.table, s.count));
+                // Include detailed error messages if available
+                if !s.keys.is_empty() {
+                    for key in &s.keys {
+                        log.push_str(&format!("    {}\n", key));
+                    }
+                }
             }
             log.push('\n');
         }

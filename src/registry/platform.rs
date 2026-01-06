@@ -17,6 +17,12 @@ pub struct PlatformInfo {
     pub registered_at: DateTime<Utc>,
     pub schemas: Vec<String>,
     pub databases: HashMap<String, DatabaseRecord>,
+    /// PostgreSQL username for this platform (for database isolation)
+    #[serde(default)]
+    pub db_user: Option<String>,
+    /// PostgreSQL password for this platform (stored encrypted in production)
+    #[serde(default)]
+    pub db_password: Option<String>,
 }
 
 /// Record of a created database
@@ -34,6 +40,19 @@ impl PlatformInfo {
             registered_at: Utc::now(),
             schemas: Vec::new(),
             databases: HashMap::new(),
+            db_user: None,
+            db_password: None,
+        }
+    }
+
+    pub fn with_credentials(name: &str, db_user: String, db_password: String) -> Self {
+        Self {
+            name: name.to_string(),
+            registered_at: Utc::now(),
+            schemas: Vec::new(),
+            databases: HashMap::new(),
+            db_user: Some(db_user),
+            db_password: Some(db_password),
         }
     }
 }
@@ -223,6 +242,8 @@ mod tests {
         let info = registry.register_platform("testapp").unwrap();
         assert_eq!(info.name, "testapp");
         assert!(info.schemas.is_empty());
+        assert_eq!(info.db_user, None);
+        assert_eq!(info.db_password, None);
 
         // Should fail on duplicate
         assert!(registry.register_platform("testapp").is_err());

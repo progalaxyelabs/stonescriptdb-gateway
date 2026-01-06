@@ -1,3 +1,4 @@
+mod audit;
 mod changelog;
 mod custom_types;
 mod dependency;
@@ -11,6 +12,7 @@ mod tables;
 mod types;
 mod verifier;
 
+pub use audit::AuditLogger;
 pub use changelog::{ChangelogManager, ChangelogEntry, ChangelogRecord, ChangeType as ChangelogChangeType};
 pub use custom_types::CustomTypeManager;
 pub use dependency::{DependencyAnalyzer, DependencyAnalysis, TableInfo, ForeignKeyDependency};

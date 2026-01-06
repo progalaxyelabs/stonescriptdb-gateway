@@ -1,8 +1,10 @@
 use crate::config::Config;
 use crate::error::{GatewayError, Result};
 use crate::pool::router::DatabaseRouter;
+use crate::registry::PlatformRegistry;
 use dashmap::DashMap;
 use deadpool_postgres::{Config as PoolConfig, Pool, Runtime};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,6 +23,7 @@ pub struct PoolManager {
     config: Config,
     total_connections: AtomicU32,
     admin_pool: Pool,
+    data_dir: PathBuf,
 }
 
 impl PoolManager {
@@ -46,12 +49,15 @@ impl PoolManager {
 
         info!("Connected to PostgreSQL admin database");
 
+        let data_dir = config.data_dir.clone();
+
         Ok(Self {
             pools: DashMap::new(),
             router: DatabaseRouter::new(),
             config,
             total_connections: AtomicU32::new(0),
             admin_pool,
+            data_dir,
         })
     }
 
@@ -117,7 +123,56 @@ impl PoolManager {
     }
 
     fn database_url_for(&self, db_name: &str) -> Result<String> {
-        // Parse base URL and replace database name
+        // Extract platform from database name (format: platform_main or platform_tenant)
+        let platform = db_name.split('_').next().unwrap_or("");
+
+        // Try to get platform-specific credentials from registry
+        let registry = PlatformRegistry::new(&self.data_dir);
+        let (db_user, db_password) = if let Ok(platform_info) = registry.get_platform_info(platform) {
+            if let (Some(user), Some(pass)) = (platform_info.db_user, platform_info.db_password) {
+                info!("Using platform-specific credentials for database: {}", db_name);
+                (user, pass)
+            } else {
+                // No platform-specific credentials, use default
+                return self.database_url_with_default_creds(db_name);
+            }
+        } else {
+            // Platform not registered or no credentials, use default
+            return self.database_url_with_default_creds(db_name);
+        };
+
+        // Build URL with platform-specific credentials
+        // Parse base URL to extract host, port
+        let base_url = &self.config.database_url;
+
+        // Format: postgres://user:password@host:port/database
+        if let Some(at_pos) = base_url.rfind('@') {
+            if let Some(slash_pos) = base_url[at_pos..].find('/') {
+                let host_port = &base_url[at_pos + 1..at_pos + slash_pos];
+
+                // URL-encode password to handle special characters
+                let encoded_password = urlencoding::encode(&db_password);
+
+                Ok(format!(
+                    "postgres://{}:{}@{}/{}",
+                    db_user, encoded_password, host_port, db_name
+                ))
+            } else {
+                Err(GatewayError::Internal(format!(
+                    "Invalid DATABASE_URL format (missing /): {}",
+                    base_url
+                )))
+            }
+        } else {
+            Err(GatewayError::Internal(format!(
+                "Invalid DATABASE_URL format (missing @): {}",
+                base_url
+            )))
+        }
+    }
+
+    /// Fallback: Build database URL using default gateway credentials
+    fn database_url_with_default_creds(&self, db_name: &str) -> Result<String> {
         let base_url = &self.config.database_url;
 
         // Find the last '/' and replace everything after it
@@ -234,6 +289,42 @@ impl PoolManager {
             .map_err(|e| GatewayError::Internal(format!("Failed to create database: {}", e)))?;
 
         info!("Created database: {}", db_name);
+        Ok(())
+    }
+
+    pub async fn drop_database(&self, db_name: &str) -> Result<()> {
+        let client = self.admin_pool.get().await.map_err(|e| {
+            GatewayError::ConnectionFailed {
+                database: "postgres (admin)".to_string(),
+                cause: e.to_string(),
+            }
+        })?;
+
+        // Validate db_name to prevent SQL injection
+        if !is_valid_identifier(db_name) {
+            return Err(GatewayError::InvalidRequest {
+                message: format!("Invalid database name: {}", db_name),
+            });
+        }
+
+        // Remove pool if it exists
+        self.pools.remove(db_name);
+
+        // Terminate all connections to the database before dropping
+        let terminate_sql = format!(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{}' AND pid <> pg_backend_pid()",
+            db_name
+        );
+        client.execute(&terminate_sql, &[]).await.ok(); // Ignore errors - database might not have active connections
+
+        // Drop the database
+        let sql = format!("DROP DATABASE IF EXISTS \"{}\"", db_name);
+        client
+            .batch_execute(&sql)
+            .await
+            .map_err(|e| GatewayError::Internal(format!("Failed to drop database: {}", e)))?;
+
+        info!("Dropped database: {}", db_name);
         Ok(())
     }
 

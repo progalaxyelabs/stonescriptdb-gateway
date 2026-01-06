@@ -39,6 +39,11 @@ impl PlatformState {
 #[derive(Debug, Deserialize)]
 pub struct RegisterPlatformRequest {
     pub platform: String,
+    /// Optional: PostgreSQL username for platform-specific database isolation
+    /// If not provided, uses the default gateway user (less secure)
+    pub db_user: Option<String>,
+    /// Optional: PostgreSQL password for platform-specific database isolation
+    pub db_password: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -46,20 +51,46 @@ pub struct RegisterPlatformResponse {
     pub status: String,
     pub platform: String,
     pub message: String,
+    pub has_dedicated_credentials: bool,
 }
 
 pub async fn register_platform(
     State(state): State<Arc<PlatformState>>,
     Json(request): Json<RegisterPlatformRequest>,
 ) -> Result<impl IntoResponse> {
-    let info = state.registry.register_platform(&request.platform)?;
+    // Register platform with optional credentials
+    let info = if let (Some(db_user), Some(db_password)) = (request.db_user, request.db_password) {
+        // Validate credentials are not empty
+        if db_user.is_empty() || db_password.is_empty() {
+            return Err(GatewayError::InvalidRequest {
+                message: "db_user and db_password must not be empty".to_string(),
+            });
+        }
+
+        let mut info = state.registry.register_platform(&request.platform)?;
+        info.db_user = Some(db_user);
+        info.db_password = Some(db_password);
+        state.registry.save_platform_info(&info)?;
+        info
+    } else {
+        state.registry.register_platform(&request.platform)?
+    };
+
+    let has_dedicated_credentials = info.db_user.is_some();
+
+    let message = if has_dedicated_credentials {
+        "Platform registered with dedicated PostgreSQL credentials. Database isolation enabled.".to_string()
+    } else {
+        "Platform registered using default gateway credentials. For better security, provide db_user and db_password.".to_string()
+    };
 
     Ok((
         StatusCode::CREATED,
         Json(RegisterPlatformResponse {
             status: "registered".to_string(),
             platform: info.name,
-            message: "Platform registered. Use POST /platform/{platform}/schema to add schemas.".to_string(),
+            message,
+            has_dedicated_credentials,
         }),
     ))
 }

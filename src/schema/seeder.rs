@@ -105,8 +105,9 @@ impl SeederRunner {
         let content = self.remove_comments(content);
 
         // Find INSERT INTO statement
+        // Capture everything after VALUES but stop at ON CONFLICT, ON DUPLICATE KEY, or semicolon
         let insert_re = regex::Regex::new(
-            r"(?is)INSERT\s+INTO\s+(\w+)\s*\(\s*([^)]+)\s*\)\s*VALUES\s*(.*)"
+            r"(?is)INSERT\s+INTO\s+(\w+)\s*\(\s*([^)]+)\s*\)\s*VALUES\s+(.*?)(?:ON\s+(?:CONFLICT|DUPLICATE\s+KEY)|;|$)"
         ).unwrap();
 
         let caps = match insert_re.captures(&content) {
@@ -126,7 +127,7 @@ impl SeederRunner {
         let values_str = &caps[3];
 
         // Parse individual value tuples
-        let records = self.parse_values(values_str, &columns)?;
+        let records = self.parse_values(values_str, &columns, &name, &table_name)?;
 
         // First column is assumed to be primary key (common convention)
         // TODO: Could be enhanced to detect actual PK from table definition
@@ -154,7 +155,7 @@ impl SeederRunner {
     }
 
     /// Parse VALUES clause into individual records
-    fn parse_values(&self, values_str: &str, columns: &[String]) -> Result<Vec<SeederRecord>> {
+    fn parse_values(&self, values_str: &str, columns: &[String], file_name: &str, table_name: &str) -> Result<Vec<SeederRecord>> {
         let mut records = Vec::new();
 
         // Match individual value tuples: (val1, val2, ...)
@@ -171,9 +172,14 @@ impl SeederRunner {
                 });
             } else {
                 warn!(
-                    "Value count mismatch: expected {} columns, got {} values",
+                    "Seeder file '{}' for table '{}': Value count mismatch in tuple '{}': expected {} columns {:?}, got {} values {:?}",
+                    file_name,
+                    table_name,
+                    values_inner,
                     columns.len(),
-                    values.len()
+                    columns,
+                    values.len(),
+                    values
                 );
             }
         }
@@ -290,11 +296,24 @@ impl SeederRunner {
                 seeder.table_name, columns_str, values_str
             );
 
+            debug!("Executing seeder SQL for {}: {}", seeder.table_name, insert_sql);
+
             client.execute(&insert_sql, &[]).await.map_err(|e| {
+                // Extract detailed error message from PostgreSQL error
+                let error_detail = if let Some(db_err) = e.as_db_error() {
+                    format!("{} - {}", db_err.message(),
+                        db_err.detail().unwrap_or("no additional detail"))
+                } else {
+                    e.to_string()
+                };
+
+                warn!("Seeder insert failed for table {}: SQL = '{}', Error = {}",
+                    seeder.table_name, insert_sql, error_detail);
+
                 GatewayError::QueryFailed {
                     database: database.to_string(),
                     function: format!("seeder insert: {}", seeder.table_name),
-                    cause: e.to_string(),
+                    cause: error_detail,
                 }
             })?;
 
@@ -365,7 +384,11 @@ impl SeederRunner {
                 migration: "seeder validation".to_string(),
                 cause: format!(
                     "Seeder validation failed. Missing records in: {}. \
-                    Developer must add migration to insert missing seeder data.",
+                    These records should have been inserted during /register but are missing. \
+                    Possible causes: (1) Initial /register failed - check logs for INSERT errors (e.g., missing required columns, constraint violations), \
+                    (2) Records were manually deleted. \
+                    Solution: Fix the table schema (e.g., add SERIAL to auto-increment columns) and re-register, \
+                    OR create a migration to manually INSERT the missing seeder data.",
                     missing_details.join("; ")
                 ),
             });

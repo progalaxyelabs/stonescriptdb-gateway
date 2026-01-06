@@ -25,8 +25,8 @@ pub struct MigrateV2State {
 pub struct MigrateV2Request {
     pub platform: String,
     pub schema_name: String,
-    #[serde(default)]
-    pub database_id: Option<String>,
+    /// Required: specific database/tenant to migrate (e.g., "main" for main DB, or tenant ID for tenant DB)
+    pub database_id: String,
     #[serde(default)]
     pub force: bool,
 }
@@ -149,46 +149,32 @@ pub async fn migrate_schema_v2(
     let mut schema_validation: Option<SchemaValidationInfo> = None;
     let mut verification_info: Option<VerificationInfo> = None;
 
-    // Get databases to migrate
-    let databases_to_migrate: Vec<String> = if let Some(db_id) = &request.database_id {
-        // Migrate single database
-        let db_name = format!(
-            "{}_{}_{}",
-            request.platform, request.schema_name, db_id
-        );
-        if !state.pool_manager.database_exists(&db_name).await? {
-            return Err(GatewayError::DatabaseNotFound {
-                platform: request.platform.clone(),
-                tenant_id: Some(db_id.clone()),
-            });
-        }
-        vec![db_name]
+    // Construct database name from platform, schema, and database_id
+    // database_id can be "main" or a tenant identifier
+    let db_name = if request.database_id == "main" {
+        format!("{}_main", request.platform)
     } else {
-        // Migrate ALL databases for this platform/schema
-        state
-            .platform_state
-            .registry
-            .list_databases(&request.platform, Some(&request.schema_name))?
-            .iter()
-            .map(|r| r.database_name.clone())
-            .collect()
+        format!("{}_{}", request.platform, request.database_id)
     };
 
-    if databases_to_migrate.is_empty() {
+    // Verify database exists
+    if !state.pool_manager.database_exists(&db_name).await? {
         return Err(GatewayError::InvalidRequest {
             message: format!(
-                "No databases found for platform '{}' schema '{}'",
-                request.platform, request.schema_name
+                "Database '{}' not found for platform '{}', database_id '{}'",
+                db_name, request.platform, request.database_id
             ),
         });
     }
 
     info!(
-        "Migrating {} databases for platform '{}' schema '{}'",
-        databases_to_migrate.len(),
+        "Migrating database '{}' for platform '{}' schema '{}'",
+        db_name,
         request.platform,
         request.schema_name
     );
+
+    let databases_to_migrate = vec![db_name.clone()];
 
     for (i, db_name) in databases_to_migrate.iter().enumerate() {
         let pool = state.pool_manager.get_pool_by_name(db_name).await?;

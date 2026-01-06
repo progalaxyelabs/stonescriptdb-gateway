@@ -16,6 +16,8 @@ pub struct Config {
     pub pool_max_lifetime: Duration,
     pub allowed_networks: Vec<IpNetwork>,
     pub data_dir: PathBuf,
+    pub admin_token: Option<String>,
+    pub allowed_admin_ips: Vec<IpNetwork>,
 }
 
 impl Config {
@@ -82,6 +84,24 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./data"));
 
+        // Admin authentication (optional)
+        let admin_token = env::var("ADMIN_TOKEN").ok();
+
+        let allowed_admin_ips_str = env::var("ALLOWED_ADMIN_IPS")
+            .unwrap_or_else(|_| "10.0.1.0/24".to_string());
+
+        let allowed_admin_ips = allowed_admin_ips_str
+            .split(',')
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    IpNetwork::from_str(trimmed).ok()
+                }
+            })
+            .collect();
+
         Ok(Config {
             database_url,
             gateway_host,
@@ -92,6 +112,8 @@ impl Config {
             pool_max_lifetime: Duration::from_secs(pool_max_lifetime_secs),
             allowed_networks,
             data_dir,
+            admin_token,
+            allowed_admin_ips,
         })
     }
 

@@ -119,42 +119,70 @@ pub async fn register_schema(
     // Extract schema
     let extractor = SchemaExtractor::from_bytes(&schema_data)?;
 
-    // Get pool for this database
-    let pool = pool_manager.get_pool(&platform, tenant_id.as_deref()).await?;
+    // Deploy schema - if anything fails, we'll drop the database to maintain atomicity
+    // Database creation is outside this block, and we use DROP DATABASE on failure for rollback
+    let deployment_result = async {
+        // Get pool for this database
+        let pool = pool_manager.get_pool(&platform, tenant_id.as_deref()).await?;
 
-    // Initialize changelog table for tracking all schema changes
-    let changelog_manager = ChangelogManager::new();
-    changelog_manager.ensure_changelog_table(&pool, &db_name).await?;
+        // Initialize changelog table for tracking all schema changes
+        let changelog_manager = ChangelogManager::new();
+        changelog_manager.ensure_changelog_table(&pool, &db_name).await?;
 
-    // Install extensions first (before types/migrations, as they may depend on them)
-    let extension_manager = ExtensionManager::new();
-    let extensions_installed = extension_manager
-        .install_extensions(&pool, &db_name, &extractor.extensions_dir())
-        .await?;
+        // Install extensions first (before types/migrations, as they may depend on them)
+        let extension_manager = ExtensionManager::new();
+        let extensions_installed = extension_manager
+            .install_extensions(&pool, &db_name, &extractor.extensions_dir())
+            .await?;
 
-    // Deploy custom types (after extensions, before tables)
-    let type_manager = CustomTypeManager::new();
-    let types_deployed = type_manager
-        .deploy_types(&pool, &db_name, &extractor.types_dir())
-        .await?;
+        // Deploy custom types (after extensions, before tables)
+        let type_manager = CustomTypeManager::new();
+        let types_deployed = type_manager
+            .deploy_types(&pool, &db_name, &extractor.types_dir())
+            .await?;
 
-    // Create tables from declarative schema (NOT from migrations/)
-    let table_deployer = TableDeployer::new();
-    let tables_created = table_deployer
-        .deploy_tables(&pool, &db_name, &extractor.tables_dir())
-        .await?;
+        // Create tables from declarative schema (NOT from migrations/)
+        let table_deployer = TableDeployer::new();
+        let tables_created = table_deployer
+            .deploy_tables(&pool, &db_name, &extractor.tables_dir())
+            .await?;
 
-    // Deploy functions
-    let function_deployer = FunctionDeployer::new();
-    let functions_deployed = function_deployer
-        .deploy_functions(&pool, &db_name, &extractor.functions_dir())
-        .await?;
+        // Deploy functions
+        let function_deployer = FunctionDeployer::new();
+        let functions_deployed = function_deployer
+            .deploy_functions(&pool, &db_name, &extractor.functions_dir())
+            .await?;
 
-    // Run seeders (only inserts into empty tables)
-    let seeder_runner = SeederRunner::new();
-    let seeder_results = seeder_runner
-        .run_seeders_on_register(&pool, &db_name, &extractor.seeders_dir())
-        .await?;
+        // Run seeders (only inserts into empty tables)
+        // This is critical - if seeder fails, the entire registration fails
+        let seeder_runner = SeederRunner::new();
+        let seeder_results = seeder_runner
+            .run_seeders_on_register(&pool, &db_name, &extractor.seeders_dir())
+            .await?;
+
+        Ok::<_, GatewayError>((
+            pool,
+            changelog_manager,
+            extensions_installed,
+            types_deployed,
+            tables_created,
+            functions_deployed,
+            seeder_results,
+        ))
+    }.await;
+
+    // Handle deployment result - drop database on failure
+    let (pool, changelog_manager, extensions_installed, types_deployed, tables_created, functions_deployed, seeder_results) = match deployment_result {
+        Ok(data) => data,
+        Err(e) => {
+            warn!("Schema deployment failed for '{}', dropping database: {}", db_name, e);
+            // Drop the database on any failure
+            if let Err(drop_err) = pool_manager.drop_database(&db_name).await {
+                warn!("Failed to drop database '{}' after deployment failure: {}", db_name, drop_err);
+            }
+            return Err(e);
+        }
+    };
 
     let seeders: Vec<SeederInfo> = seeder_results
         .into_iter()

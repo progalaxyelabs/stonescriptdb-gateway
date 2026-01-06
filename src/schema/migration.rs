@@ -459,10 +459,29 @@ impl MigrationRunner {
             client
                 .batch_execute(&sql)
                 .await
-                .map_err(|e| GatewayError::MigrationFailed {
-                    database: database.to_string(),
-                    migration: migration.name.clone(),
-                    cause: e.to_string(),
+                .map_err(|e| {
+                    // Extract detailed error message from PostgreSQL error
+                    let error_detail = if let Some(db_err) = e.as_db_error() {
+                        format!(
+                            "{} - {} (HINT: {})",
+                            db_err.message(),
+                            db_err.detail().unwrap_or("no additional detail"),
+                            db_err.hint().unwrap_or("no hint provided")
+                        )
+                    } else {
+                        e.to_string()
+                    };
+
+                    warn!(
+                        "Migration '{}' failed for database '{}': {}",
+                        migration.name, database, error_detail
+                    );
+
+                    GatewayError::MigrationFailed {
+                        database: database.to_string(),
+                        migration: migration.name.clone(),
+                        cause: error_detail,
+                    }
                 })?;
 
             // Record the migration

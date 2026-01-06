@@ -1,7 +1,7 @@
 # Development Environment Setup
 
 ---
-**📖 Navigation:** [Home](../README.md) | [Quick Start](QUICKSTART.md) | [Integration](INTEGRATION.md) | [HLD](../HLD.md) | **Dev Setup** | [API v2](API-V2.md)
+**📖 Navigation:** [Home](../../README.md) | [Quick Start](../getting-started/README.md) | [Integration](integration.md) | [HLD](../../HLD.md) | **Dev Setup** | [API v2](../api/v2.md)
 
 ---
 

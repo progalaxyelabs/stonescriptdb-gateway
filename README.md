@@ -25,11 +25,12 @@ This service acts as a centralized database proxy and schema orchestrator for mu
 
 ## 📚 Documentation
 
-- ⚡ **[Quick Start Guide](docs/QUICKSTART.md)** - Get running in 5 minutes
-- 🔌 **[Integration Guide](docs/INTEGRATION.md)** - Connect your platform (Docker, CI/CD, multi-tenant)
+- ⚡ **[Quick Start Guide](docs/getting-started/README.md)** - Get running in 5 minutes
+- 🔌 **[Integration Guide](docs/guides/integration.md)** - Connect your platform (Docker, CI/CD, multi-tenant)
 - 🏗️ **[Architecture (HLD)](HLD.md)** - Technical design & decisions
-- 🛠️ **[Development Environment](docs/DEV-ENVIRONMENT.md)** - Local VM setup with libvirt
-- 📡 **[API v2](docs/API-V2.md)** - Multi-tenant platform management with stored schemas
+- 🛠️ **[Development Environment](docs/guides/development.md)** - Local VM setup with libvirt
+- 📡 **[API v2](docs/api/v2.md)** - Multi-tenant platform management with stored schemas
+- 🔐 **[Platform Credentials](docs/guides/platform-credentials.md)** - Database isolation with per-platform credentials
 
 ## Quick Start
 
@@ -76,7 +77,7 @@ sudo systemctl start stonescriptdb-gateway
 
 4. **Configure your Docker containers** to access the gateway at `http://<VM_IP>:9000`
 
-See [docs/DEV-ENVIRONMENT.md](./docs/DEV-ENVIRONMENT.md) for detailed VM setup instructions.
+See [docs/guides/development.md](./docs/guides/development.md) for detailed VM setup instructions.
 
 ### Alternative: Local Development
 
@@ -160,7 +161,7 @@ See [HLD.md](./HLD.md) for detailed architecture documentation.
 
 **Note:** The `/platforms` endpoint reads from the file-based platform registry (persisted to disk), not in-memory connection pools. Per-database deployment tracking (migrations, functions, types) is stored in PostgreSQL tables with checksums to skip unchanged deployments.
 
-See [docs/API-V2.md](./docs/API-V2.md) for detailed v2 API documentation.
+See [docs/api/v2.md](./docs/api/v2.md) for detailed v2 API documentation.
 
 ## Development
 
@@ -493,10 +494,12 @@ php stone gateway:migrate
 
 ## Documentation
 
-- **[Quick Start Guide](./docs/QUICKSTART.md)** - Get started in 5 minutes
-- **[Integration Guide](./docs/INTEGRATION.md)** - Detailed integration documentation (v1 API)
-- **[API v2 Guide](./docs/API-V2.md)** - Multi-tenant platform management with stored schemas
+- **[Quick Start Guide](./docs/getting-started/README.md)** - Get started in 5 minutes
+- **[Integration Guide](./docs/guides/integration.md)** - Detailed integration documentation (v1 API)
+- **[API v2 Guide](./docs/api/v2.md)** - Multi-tenant platform management with stored schemas
 - **[High-Level Design](./HLD.md)** - Architecture and design decisions
+- **[Development Environment](./docs/guides/development.md)** - Local VM setup with libvirt
+- **[Platform Credentials](./docs/guides/platform-credentials.md)** - Database isolation with per-platform credentials
 
 ## Running Tests
 

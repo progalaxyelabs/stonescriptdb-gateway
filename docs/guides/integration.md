@@ -1,7 +1,7 @@
 # StoneScriptDB Gateway Integration Guide
 
 ---
-**📖 Navigation:** [Home](../README.md) | [Quick Start](QUICKSTART.md) | **Integration** | [HLD](../HLD.md) | [Dev Setup](DEV-ENVIRONMENT.md) | [API v2](API-V2.md)
+**📖 Navigation:** [Home](../../README.md) | [Quick Start](../getting-started/README.md) | **Integration** | [HLD](../../HLD.md) | [Dev Setup](development.md) | [API v2](../api/v2.md)
 
 ---
 
@@ -20,8 +20,8 @@ This guide focuses on **how to integrate** your platform with StoneScriptDB Gate
 **Related Documentation:**
 - 📖 [README: Schema Structure](../README.md#schema-tar-gz-structure) - postgresql/ folder structure, extensions, types
 - 📖 [README: Gateway Tracking Tables](../README.md#gateway-tracking-tables) - How checksums work
-- ⚡ [Quick Start](QUICKSTART.md) - Get running in 5 minutes
-- 🔌 [API v2](API-V2.md) - Multi-tenant platform management
+- ⚡ [Quick Start](../getting-started/README.md) - Get running in 5 minutes
+- 🔌 [API v2](../api/v2.md) - Multi-tenant platform management
 
 ---
 
@@ -533,10 +533,10 @@ curl http://<VM_IP>:9000/health
 ## Related Documentation
 
 - 📖 **[Main README](../README.md)** - Features, schema structure, tracking tables
-- ⚡ **[Quick Start](QUICKSTART.md)** - Get running in 5 minutes
-- 🏗️ **[Architecture (HLD)](../HLD.md)** - Technical design decisions
-- 🛠️ **[Dev Environment](DEV-ENVIRONMENT.md)** - Local VM setup with libvirt
-- 📡 **[API v2](API-V2.md)** - Multi-tenant platform management
+- ⚡ **[Quick Start](../getting-started/README.md)** - Get running in 5 minutes
+- 🏗️ **[Architecture (HLD)](../../HLD.md)** - Technical design decisions
+- 🛠️ **[Dev Environment](development.md)** - Local VM setup with libvirt
+- 📡 **[API v2](../api/v2.md)** - Multi-tenant platform management
 
 ---
 

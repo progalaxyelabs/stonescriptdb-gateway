@@ -1,7 +1,7 @@
 # StoneScript DB Gateway - High Level Design
 
 ---
-**📖 Navigation:** [Home](README.md) | [Quick Start](docs/QUICKSTART.md) | [Integration](docs/INTEGRATION.md) | **HLD** | [Dev Setup](docs/DEV-ENVIRONMENT.md) | [API v2](docs/API-V2.md)
+**📖 Navigation:** [Home](README.md) | [Quick Start](docs/getting-started/README.md) | [Integration](docs/guides/integration.md) | **HLD** | [Dev Setup](docs/guides/development.md) | [API v2](docs/api/v2.md)
 
 ---
 

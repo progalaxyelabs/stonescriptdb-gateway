@@ -1,13 +1,13 @@
 # Quick Start Guide
 
 ---
-**📖 Navigation:** [Home](../README.md) | **Quick Start** | [Integration](INTEGRATION.md) | [HLD](../HLD.md) | [Dev Setup](DEV-ENVIRONMENT.md) | [API v2](API-V2.md)
+**📖 Navigation:** [Home](../../README.md) | **Quick Start** | [Integration](../guides/integration.md) | [HLD](../../HLD.md) | [Dev Setup](../guides/development.md) | [API v2](../api/v2.md)
 
 ---
 
 This guide assumes you have a StoneScriptDB Gateway running in a VM accessible from your development environment (e.g., at `http://<VM_IP>:9000`).
 
-If you haven't set up the gateway yet, see [DEV-ENVIRONMENT.md](./DEV-ENVIRONMENT.md) for VM setup instructions.
+If you haven't set up the gateway yet, see [Development Environment](../guides/development.md) for VM setup instructions.
 
 ## For Platform Developers
 

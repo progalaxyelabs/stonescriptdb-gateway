@@ -242,9 +242,45 @@ fn format_database_name(platform: &str, tenant_id: Option<&str>) -> String {
     }
 }
 
+/// Extract detailed error message from PostgreSQL error
+pub fn extract_db_error(err: &tokio_postgres::Error) -> String {
+    if let Some(db_err) = err.as_db_error() {
+        let mut details = vec![db_err.message().to_string()];
+
+        if let Some(detail) = db_err.detail() {
+            details.push(format!("DETAIL: {}", detail));
+        }
+
+        if let Some(hint) = db_err.hint() {
+            details.push(format!("HINT: {}", hint));
+        }
+
+        if let Some(position) = db_err.position() {
+            details.push(format!("POSITION: {:?}", position));
+        }
+
+        // Schema and table info if available
+        if let Some(schema) = db_err.schema() {
+            details.push(format!("SCHEMA: {}", schema));
+        }
+
+        if let Some(table) = db_err.table() {
+            details.push(format!("TABLE: {}", table));
+        }
+
+        if let Some(column) = db_err.column() {
+            details.push(format!("COLUMN: {}", column));
+        }
+
+        details.join(" | ")
+    } else {
+        err.to_string()
+    }
+}
+
 impl From<tokio_postgres::Error> for GatewayError {
     fn from(err: tokio_postgres::Error) -> Self {
-        GatewayError::Internal(err.to_string())
+        GatewayError::Internal(extract_db_error(&err))
     }
 }
 

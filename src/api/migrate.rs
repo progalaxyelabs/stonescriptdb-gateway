@@ -1,8 +1,8 @@
 use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
-    ChangeCompatibility, ChangelogManager, FunctionDeployer, MigrationRunner, SchemaExtractor,
-    SchemaDiff, SchemaDiffChecker, SchemaVerifier,
+    ChangeCompatibility, ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer,
+    MigrationRunner, SchemaExtractor, SchemaDiff, SchemaDiffChecker, SchemaVerifier, TableDeployer,
 };
 use axum::{
     extract::State,
@@ -56,6 +56,7 @@ pub struct MigrateResponse {
     status: String,
     databases_updated: Vec<String>,
     migrations_applied: usize,
+    tables_created: usize,
     functions_updated: usize,
     seeder_validations: Vec<SeederValidationInfo>,
     schema_validation: Option<SchemaValidationInfo>,
@@ -143,13 +144,17 @@ pub async fn migrate_schema(
     let extractor = SchemaExtractor::from_bytes(&schema_data)?;
 
     let changelog_manager = ChangelogManager::new();
+    let extension_manager = ExtensionManager::new();
+    let type_manager = CustomTypeManager::new();
     let migration_runner = MigrationRunner::new();
+    let table_deployer = TableDeployer::new();
     let function_deployer = FunctionDeployer::new();
     let schema_verifier = SchemaVerifier::new();
     let diff_checker = SchemaDiffChecker::new();
 
     let mut databases_updated = Vec::new();
     let mut total_migrations = 0;
+    let mut total_tables = 0;
     let mut total_functions = 0;
     let mut all_seeder_validations = Vec::new();
     let mut schema_validation: Option<SchemaValidationInfo> = None;
@@ -178,17 +183,32 @@ pub async fn migrate_schema(
 
         schema_validation = Some(diff_to_validation_info(&diff));
 
-        // 1. Run migrations ONLY from migrations/ folder
+        // 1. Install extensions (before types/tables, as they may depend on them)
+        let _extensions = extension_manager
+            .install_extensions(&pool, &db_name, &extractor.extensions_dir())
+            .await?;
+
+        // 2. Deploy custom types (after extensions, before tables)
+        let _types = type_manager
+            .deploy_types(&pool, &db_name, &extractor.types_dir())
+            .await?;
+
+        // 3. Run migrations from migrations/ folder
         let migrations = migration_runner
             .run_migrations(&pool, &db_name, &extractor.migrations_dir())
             .await?;
 
-        // 2. Deploy functions (always redeployed)
+        // 4. Deploy tables (creates missing tables, skips existing ones)
+        let tables = table_deployer
+            .deploy_tables(&pool, &db_name, &extractor.tables_dir())
+            .await?;
+
+        // 5. Deploy functions (always redeployed)
         let functions = function_deployer
             .deploy_functions(&pool, &db_name, &extractor.functions_dir())
             .await?;
 
-        // 3. Verify schema matches declarative definitions
+        // 4. Verify schema matches declarative definitions
         let verification = schema_verifier
             .verify_schema(
                 &pool,
@@ -247,6 +267,7 @@ pub async fn migrate_schema(
         }
 
         total_migrations += migrations;
+        total_tables += tables;
         total_functions += functions;
         databases_updated.push(db_name);
     } else {
@@ -273,17 +294,32 @@ pub async fn migrate_schema(
                 schema_validation = Some(diff_to_validation_info(&diff));
             }
 
-            // 1. Run migrations ONLY from migrations/ folder
+            // 1. Install extensions (before types/tables)
+            let _extensions = extension_manager
+                .install_extensions(&pool, db_name, &extractor.extensions_dir())
+                .await?;
+
+            // 2. Deploy custom types (after extensions, before tables)
+            let _types = type_manager
+                .deploy_types(&pool, db_name, &extractor.types_dir())
+                .await?;
+
+            // 3. Run migrations from migrations/ folder
             let migrations = migration_runner
                 .run_migrations(&pool, db_name, &extractor.migrations_dir())
                 .await?;
 
-            // 2. Deploy functions (always redeployed)
+            // 4. Deploy tables (creates missing tables)
+            let tables = table_deployer
+                .deploy_tables(&pool, db_name, &extractor.tables_dir())
+                .await?;
+
+            // 5. Deploy functions (always redeployed)
             let functions = function_deployer
                 .deploy_functions(&pool, db_name, &extractor.functions_dir())
                 .await?;
 
-            // 3. Verify schema matches declarative definitions (only on first database)
+            // 4. Verify schema matches declarative definitions (only on first database)
             if i == 0 {
                 let verification = schema_verifier
                     .verify_schema(
@@ -344,6 +380,7 @@ pub async fn migrate_schema(
             }
 
             total_migrations += migrations;
+            total_tables += tables;
             total_functions += functions;
             databases_updated.push(db_name.clone());
         }
@@ -358,10 +395,11 @@ pub async fn migrate_schema(
     };
 
     info!(
-        "Migration complete for platform {}: {} databases, {} migrations, {} functions in {}ms",
+        "Migration complete for platform {}: {} databases, {} migrations, {} tables, {} functions in {}ms",
         platform,
         databases_updated.len(),
         total_migrations,
+        total_tables,
         total_functions,
         execution_time_ms
     );
@@ -372,6 +410,7 @@ pub async fn migrate_schema(
             status,
             databases_updated,
             migrations_applied: total_migrations,
+            tables_created: total_tables,
             functions_updated: total_functions,
             seeder_validations: all_seeder_validations,
             schema_validation,

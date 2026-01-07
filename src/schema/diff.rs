@@ -230,6 +230,7 @@ impl SchemaDiffChecker {
                     t.table_name,
                     c.column_name,
                     c.data_type,
+                    c.udt_name,
                     c.is_nullable,
                     c.column_default,
                     c.character_maximum_length,
@@ -257,17 +258,29 @@ impl SchemaDiffChecker {
             let table_name: String = row.get(0);
             let column_name: String = row.get(1);
             let data_type: String = row.get(2);
-            let is_nullable_str: String = row.get(3);
-            let column_default: Option<String> = row.get(4);
-            let char_max_len: Option<i32> = row.get(5);
-            let numeric_precision: Option<i32> = row.get(6);
-            let numeric_scale: Option<i32> = row.get(7);
+            let udt_name: String = row.get(3);
+            let is_nullable_str: String = row.get(4);
+            let column_default: Option<String> = row.get(5);
+            let char_max_len: Option<i32> = row.get(6);
+            let numeric_precision: Option<i32> = row.get(7);
+            let numeric_scale: Option<i32> = row.get(8);
 
             let is_nullable = is_nullable_str.to_uppercase() == "YES";
 
+            // Convert ARRAY types to proper notation (e.g., ARRAY with udt_name _text -> TEXT[])
+            let normalized_data_type = if data_type.to_uppercase() == "ARRAY" {
+                if let Some(element_type) = udt_name.strip_prefix('_') {
+                    format!("{}[]", element_type.to_uppercase())
+                } else {
+                    data_type.to_uppercase()
+                }
+            } else {
+                data_type.to_uppercase()
+            };
+
             let column = ColumnSchema {
                 name: column_name.clone(),
-                data_type: data_type.to_uppercase(),
+                data_type: normalized_data_type,
                 is_nullable,
                 column_default,
                 character_maximum_length: char_max_len,
@@ -546,6 +559,17 @@ impl SchemaDiffChecker {
                 database,
                 diff.incompatible_changes.len()
             );
+            for change in &diff.incompatible_changes {
+                warn!(
+                    "  - {:?} on {}.{}: {} -> {} ({})",
+                    change.change_type,
+                    change.table,
+                    change.column.as_deref().unwrap_or("*"),
+                    change.from_type.as_deref().unwrap_or("-"),
+                    change.to_type.as_deref().unwrap_or("-"),
+                    change.reason.as_deref().unwrap_or("incompatible types")
+                );
+            }
         }
 
         // Check if we should block

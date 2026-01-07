@@ -1,11 +1,11 @@
-use crate::error::{GatewayError, Result};
+use crate::error::{extract_db_error, GatewayError, Result};
 use crate::pool::PoolManager;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::debug;
+use tracing::{debug, error};
 
 #[derive(Debug, Deserialize)]
 pub struct CallRequest {
@@ -66,10 +66,17 @@ pub async fn call_function(
         client
             .query(&query, &[])
             .await
-            .map_err(|e| GatewayError::QueryFailed {
-                database: db_name.clone(),
-                function: request.function.clone(),
-                cause: e.to_string(),
+            .map_err(|e| {
+                let detailed_error = extract_db_error(&e);
+                error!(
+                    "Function call failed: {} on {} - {}",
+                    request.function, db_name, detailed_error
+                );
+                GatewayError::QueryFailed {
+                    database: db_name.clone(),
+                    function: request.function.clone(),
+                    cause: detailed_error,
+                }
             })?
     } else {
         // Build inline SQL with properly escaped/typed values
@@ -106,10 +113,17 @@ pub async fn call_function(
         client
             .query(&query, &[])
             .await
-            .map_err(|e| GatewayError::QueryFailed {
-                database: db_name.clone(),
-                function: request.function.clone(),
-                cause: e.to_string(),
+            .map_err(|e| {
+                let detailed_error = extract_db_error(&e);
+                error!(
+                    "Function call failed: {} on {} - Query: {} - Error: {}",
+                    request.function, db_name, query, detailed_error
+                );
+                GatewayError::QueryFailed {
+                    database: db_name.clone(),
+                    function: request.function.clone(),
+                    cause: detailed_error,
+                }
             })?
     };
 

@@ -228,7 +228,7 @@ impl TypeChecker {
 
     /// Normalize type name for comparison
     fn normalize_type(&self, type_name: &str) -> String {
-        type_name
+        let normalized = type_name
             .trim()
             .to_uppercase()
             .replace("CHARACTER VARYING", "VARCHAR")
@@ -237,9 +237,19 @@ impl TypeChecker {
             .replace("INT2", "SMALLINT")
             .replace("FLOAT4", "REAL")
             .replace("FLOAT8", "DOUBLE PRECISION")
-            .replace("BOOL", "BOOLEAN")
             .replace("TIMESTAMP WITHOUT TIME ZONE", "TIMESTAMP")
-            .replace("TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ")
+            .replace("TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ");
+
+        // Handle aliases that are substrings (must check whole word to avoid false replacements)
+        // e.g., "BOOL" is substring of "BOOLEAN", "INT" is substring of "INTEGER"
+        if normalized == "INT" {
+            return "INTEGER".to_string();
+        }
+        if normalized == "BOOL" {
+            return "BOOLEAN".to_string();
+        }
+
+        normalized
     }
 
     /// Extract base type without parameters (e.g., VARCHAR(100) -> VARCHAR)

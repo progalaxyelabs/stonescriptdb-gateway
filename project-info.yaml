@@ -1,0 +1,3 @@
+project_code: SSGW-001
+name: StoneScriptDB Gateway
+description: Gateway service for StoneScriptDB database operations

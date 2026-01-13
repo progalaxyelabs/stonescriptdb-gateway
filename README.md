@@ -1,7 +1,7 @@
 # StoneScript DB Gateway
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/YOUR-ORG/stonescriptdb-gateway)](https://github.com/YOUR-ORG/stonescriptdb-gateway/releases)
+[![GitHub release](https://img.shields.io/github/v/release/progalaxyelabs/stonescriptdb-gateway)](https://github.com/progalaxyelabs/stonescriptdb-gateway/releases)
 
 Rust-based multi-tenant database gateway and schema orchestrator for PostgreSQL function-based platforms.
 
@@ -50,9 +50,9 @@ The gateway is designed to run in a dedicated VM alongside PostgreSQL, separate 
 
 ```bash
 # On the VM:
-git clone https://github.com/YOUR-ORG/stonescriptdb-gateway.git
+git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
 cd stonescriptdb-gateway
-git checkout v1.0.0
+git checkout v1.2.0
 
 # Build the binary (or use Docker build)
 cargo build --release
@@ -85,7 +85,7 @@ For local development and testing, you can run the gateway directly:
 
 ```bash
 # Clone
-git clone https://github.com/YOUR-ORG/stonescriptdb-gateway.git
+git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
 cd stonescriptdb-gateway
 
 # Setup
@@ -202,7 +202,7 @@ sudo systemctl restart stonescriptdb-gateway
 
 ```bash
 # Clone
-git clone https://github.com/YOUR-ORG/stonescriptdb-gateway.git
+git clone https://github.com/progalaxyelabs/stonescriptdb-gateway.git
 cd stonescriptdb-gateway
 
 # Setup
@@ -513,9 +513,9 @@ GATEWAY_URL=http://localhost:9000 ./tests/run-tests.sh
 
 ## Links
 
-- **GitHub:** https://github.com/YOUR-ORG/stonescriptdb-gateway
-- **Issues:** https://github.com/YOUR-ORG/stonescriptdb-gateway/issues
-- **Releases:** https://github.com/YOUR-ORG/stonescriptdb-gateway/releases
+- **GitHub:** https://github.com/progalaxyelabs/stonescriptdb-gateway
+- **Issues:** https://github.com/progalaxyelabs/stonescriptdb-gateway/issues
+- **Releases:** https://github.com/progalaxyelabs/stonescriptdb-gateway/releases
 
 ## License
 

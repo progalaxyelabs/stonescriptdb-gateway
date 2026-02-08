@@ -1,0 +1,23 @@
+-- Migration: Create revoked_tokens table
+-- Purpose: Track revoked refresh tokens for logout functionality
+-- Dependencies: 001_create_identities.pssql
+
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+    id SERIAL PRIMARY KEY,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    identity_id UUID REFERENCES identities(id) ON DELETE CASCADE,
+    revoked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for efficient lookup
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_hash ON revoked_tokens(token_hash);
+
+-- Index for cleanup of expired tokens
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
+
+-- Add comment for documentation
+COMMENT ON TABLE revoked_tokens IS 'Stores hashed refresh tokens that have been revoked via logout';
+COMMENT ON COLUMN revoked_tokens.token_hash IS 'SHA-256 hash of the revoked refresh token';
+COMMENT ON COLUMN revoked_tokens.expires_at IS 'When the original token would have expired (for cleanup)';

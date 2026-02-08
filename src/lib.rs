@@ -6,3 +6,6 @@
 pub mod schema;
 pub mod error;
 pub mod registry;
+pub mod auth;
+pub mod email;
+pub mod config;

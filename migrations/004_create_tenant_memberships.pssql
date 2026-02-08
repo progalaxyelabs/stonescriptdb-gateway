@@ -1,0 +1,29 @@
+-- Migration: Create tenant_memberships table
+-- Order: 004
+
+CREATE TABLE IF NOT EXISTS tenant_memberships (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    identity_id UUID NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+    platform_code VARCHAR(50) NOT NULL,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_slug VARCHAR(100) NOT NULL,
+    tenant_db_schema VARCHAR(63) NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'member',
+    local_user_id INTEGER,
+    status VARCHAR(50) NOT NULL DEFAULT 'active',
+    invited_by UUID REFERENCES identities(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(identity_id, tenant_id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_identity_id ON tenant_memberships(identity_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant_id ON tenant_memberships(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_platform_code ON tenant_memberships(platform_code);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_role ON tenant_memberships(role);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_status ON tenant_memberships(status);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_local_user_id ON tenant_memberships(local_user_id);
+
+-- Add comment
+COMMENT ON TABLE tenant_memberships IS 'User memberships in tenants with role-based access control';

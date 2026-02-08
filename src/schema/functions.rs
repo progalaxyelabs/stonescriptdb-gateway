@@ -432,7 +432,7 @@ impl FunctionDeployer {
         // Find existing functions with same source file but different signature
         let rows = client
             .query(
-                "SELECT function_name, param_types FROM _stonescriptdb_gateway_functions
+                "SELECT function_name, param_types, return_type FROM _stonescriptdb_gateway_functions
                  WHERE source_file = $1",
                 &[&file_name],
             )
@@ -448,9 +448,14 @@ impl FunctionDeployer {
         for row in rows {
             let old_name: String = row.get(0);
             let old_param_types: Vec<String> = row.get(1);
+            let old_return_type: String = row.get(2);
 
-            // Check if signature changed
-            if old_name != new_signature.name || old_param_types != new_param_types {
+            // Check if signature changed (name, parameters, or return type)
+            let signature_changed = old_name != new_signature.name
+                || old_param_types != new_param_types
+                || old_return_type != new_signature.return_type;
+
+            if signature_changed {
                 // Signature changed - need to drop old function
                 let old_sig = if old_param_types.is_empty() {
                     format!("{}()", old_name)
@@ -458,9 +463,31 @@ impl FunctionDeployer {
                     format!("{}({})", old_name, old_param_types.join(", "))
                 };
 
+                // Determine what changed for better logging
+                let mut changes = Vec::new();
+                if old_name != new_signature.name {
+                    changes.push(format!("name: {} → {}", old_name, new_signature.name));
+                }
+                if old_param_types != new_param_types {
+                    changes.push(format!(
+                        "parameters: ({}) → ({})",
+                        old_param_types.join(", "),
+                        new_param_types.join(", ")
+                    ));
+                }
+                if old_return_type != new_signature.return_type {
+                    changes.push(format!(
+                        "return type: {} → {}",
+                        old_return_type,
+                        new_signature.return_type
+                    ));
+                }
+
                 info!(
-                    "Function signature changed in {}: dropping old signature {}",
-                    file_name, old_sig
+                    "Function signature changed in {} [{}]: dropping old signature {}",
+                    file_name,
+                    changes.join(", "),
+                    old_sig
                 );
 
                 let drop_sql = format!("DROP FUNCTION IF EXISTS {}", old_sig);
@@ -782,5 +809,60 @@ mod tests {
 
         // Both should have identical checksums (case normalized)
         assert_eq!(sig_upper.body_checksum, sig_lower.body_checksum);
+    }
+
+    #[test]
+    fn test_return_type_change_different_signature() {
+        let deployer = FunctionDeployer::new();
+
+        // Before: RETURNS TABLE with TEXT columns
+        let sql_before = r#"
+            CREATE OR REPLACE FUNCTION upsert_oauth_user(
+                p_provider TEXT,
+                p_provider_user_id TEXT,
+                p_email TEXT
+            )
+            RETURNS TABLE (
+                o_user_id INT,
+                o_provider TEXT,
+                o_provider_user_id TEXT,
+                o_email TEXT
+            ) AS $$
+            BEGIN END;
+            $$ LANGUAGE plpgsql;
+        "#;
+
+        // After: RETURNS TABLE with VARCHAR columns (matching actual table types)
+        let sql_after = r#"
+            CREATE OR REPLACE FUNCTION upsert_oauth_user(
+                p_provider TEXT,
+                p_provider_user_id TEXT,
+                p_email TEXT
+            )
+            RETURNS TABLE (
+                o_user_id INT,
+                o_provider VARCHAR(50),
+                o_provider_user_id VARCHAR(255),
+                o_email VARCHAR(255)
+            ) AS $$
+            BEGIN END;
+            $$ LANGUAGE plpgsql;
+        "#;
+
+        let sig_before = deployer.parse_signature(sql_before).unwrap();
+        let sig_after = deployer.parse_signature(sql_after).unwrap();
+
+        // Same function name and parameters
+        assert_eq!(sig_before.name, sig_after.name);
+        assert_eq!(sig_before.parameters.len(), sig_after.parameters.len());
+        assert_eq!(sig_before.drop_signature(), sig_after.drop_signature());
+
+        // Different return types
+        assert_ne!(sig_before.return_type, sig_after.return_type);
+        assert!(sig_before.return_type.contains("TEXT"));
+        assert!(sig_after.return_type.contains("VARCHAR"));
+
+        // This return type change requires DROP before CREATE OR REPLACE
+        // The handle_signature_change function should detect this and drop the old function
     }
 }

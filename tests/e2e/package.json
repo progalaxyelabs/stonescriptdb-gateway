@@ -1,0 +1,24 @@
+{
+  "name": "stonescriptdb-gateway-e2e-tests",
+  "version": "1.0.0",
+  "description": "End-to-end tests for StoneScriptDB Gateway identity system",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report",
+    "test:codegen": "playwright codegen http://192.168.122.173:9000"
+  },
+  "keywords": ["e2e", "playwright", "identity", "auth", "testing"],
+  "author": "Progalaxy eLabs",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

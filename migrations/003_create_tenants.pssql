@@ -1,0 +1,29 @@
+-- Migration: Create tenants table
+-- Order: 003
+
+CREATE TABLE IF NOT EXISTS tenants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    platform_code VARCHAR(50) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    db_schema VARCHAR(63) NOT NULL,
+    owner_identity_id UUID NOT NULL REFERENCES identities(id) ON DELETE RESTRICT,
+    status VARCHAR(50) NOT NULL DEFAULT 'active',
+    settings JSONB DEFAULT '{}'::jsonb,
+    branding JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(platform_code, slug),
+    UNIQUE(db_schema)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_tenants_platform_code ON tenants(platform_code);
+CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug);
+CREATE INDEX IF NOT EXISTS idx_tenants_platform_slug ON tenants(platform_code, slug);
+CREATE INDEX IF NOT EXISTS idx_tenants_owner_identity_id ON tenants(owner_identity_id);
+CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
+CREATE INDEX IF NOT EXISTS idx_tenants_db_schema ON tenants(db_schema);
+
+-- Add comment
+COMMENT ON TABLE tenants IS 'Multi-tenant organizations/workspaces per platform';

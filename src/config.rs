@@ -18,6 +18,19 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub admin_token: Option<String>,
     pub allowed_admin_ips: Vec<IpNetwork>,
+    // SMTP configuration for email sending
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_from_email: Option<String>,
+    pub smtp_from_name: Option<String>,
+    pub email_dev_mode: bool, // If true, log emails instead of sending
+    // OAuth configuration
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<String>,
+    // Frontend URL for email links
+    pub frontend_url: Option<String>,
 }
 
 impl Config {
@@ -102,6 +115,27 @@ impl Config {
             })
             .collect();
 
+        // SMTP configuration (optional)
+        let smtp_host = env::var("SMTP_HOST").ok();
+        let smtp_port = env::var("SMTP_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok());
+        let smtp_username = env::var("SMTP_USERNAME").ok();
+        let smtp_password = env::var("SMTP_PASSWORD").ok();
+        let smtp_from_email = env::var("SMTP_FROM_EMAIL").ok();
+        let smtp_from_name = env::var("SMTP_FROM_NAME").ok();
+        let email_dev_mode = env::var("EMAIL_DEV_MODE")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse()
+            .unwrap_or(false);
+
+        // OAuth configuration (optional)
+        let google_client_id = env::var("GOOGLE_CLIENT_ID").ok();
+        let google_client_secret = env::var("GOOGLE_CLIENT_SECRET").ok();
+
+        // Frontend URL for email links
+        let frontend_url = env::var("FRONTEND_URL").ok();
+
         Ok(Config {
             database_url,
             gateway_host,
@@ -114,6 +148,16 @@ impl Config {
             data_dir,
             admin_token,
             allowed_admin_ips,
+            smtp_host,
+            smtp_port,
+            smtp_username,
+            smtp_password,
+            smtp_from_email,
+            smtp_from_name,
+            email_dev_mode,
+            google_client_id,
+            google_client_secret,
+            frontend_url,
         })
     }
 

@@ -69,6 +69,24 @@ pub enum GatewayError {
         target_platform: String,
     },
 
+    #[error("Signature verification failed for client '{client_id}': {reason}")]
+    SignatureVerificationFailed { client_id: String, reason: String },
+
+    #[error("Timestamp expired: {timestamp} is {age_seconds} seconds old")]
+    TimestampExpired {
+        timestamp: i64,
+        age_seconds: i64,
+    },
+
+    #[error("Unauthorized function call: client '{client_id}' not allowed to call '{function}'")]
+    UnauthorizedFunction {
+        client_id: String,
+        function: String,
+    },
+
+    #[error("Invalid or unknown client ID: {client_id}")]
+    InvalidClientId { client_id: String },
+
     #[error("Internal error: {0}")]
     Internal(String),
 }

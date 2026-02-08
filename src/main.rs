@@ -1,5 +1,7 @@
 mod api;
+mod auth;
 mod config;
+mod email;
 mod error;
 mod pool;
 mod registry;
@@ -7,12 +9,19 @@ mod schema;
 mod security;
 
 use crate::api::{
-    admin_create_tenant, admin_list_databases, call_function, create_database, health_check,
-    list_databases, list_platforms, list_schemas, migrate_schema, migrate_schema_v2,
-    register_platform, register_platform_schema, register_schema, DatabaseState, MigrateV2State,
-    PlatformState,
+    accept_invite, admin_create_tenant, admin_list_databases, call_function, change_password,
+    create_database, delete_oauth_connection, get_jwks, get_oauth_connections, health_check,
+    invite_membership, list_databases, list_memberships, list_platforms, list_schemas, login,
+    logout, migrate_schema, migrate_schema_v2, oauth_callback, oauth_initiate,
+    password_reset_confirm, password_reset_request, refresh, register, register_platform,
+    register_platform_schema, register_schema, select_tenant, switch_tenant, update_membership,
+    DatabaseState, MigrateV2State, PlatformState,
 };
+use crate::auth::jwt::JwtService;
+use crate::auth::oauth::OAuthService;
+use crate::auth::rate_limit::{AuthRateLimiters, login_rate_limit, register_rate_limit, password_reset_rate_limit};
 use crate::config::Config;
+use crate::email::EmailService;
 use crate::pool::PoolManager;
 use crate::schema::AuditLogger;
 use crate::security::{admin_auth_middleware, AdminAuthConfig, IpFilterLayer};
@@ -21,6 +30,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use deadpool_postgres::Pool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -131,6 +141,32 @@ async fn main() -> anyhow::Result<()> {
         warn!("Admin endpoints DISABLED - ADMIN_TOKEN not configured");
     }
 
+    // Initialize JWT service
+    let jwt_service = Arc::new(
+        JwtService::new_from_env()
+            .or_else(|_| {
+                warn!("JWT keys not found in environment, generating new keys");
+                JwtService::new_with_generated_keys()
+            })
+            .expect("Failed to initialize JWT service")
+    );
+    info!("JWT service initialized");
+
+    // Initialize OAuth service
+    let oauth_service = Arc::new(OAuthService::new());
+    info!("OAuth service initialized");
+
+    // Initialize Email service
+    let email_service = Arc::new(EmailService::new(config.clone())?);
+    info!("Email service initialized");
+
+    // Initialize rate limiters for auth endpoints
+    let rate_limiters = AuthRateLimiters::new();
+    info!("Rate limiters initialized for auth endpoints");
+
+    // Wrap config in Arc for sharing
+    let config_arc = Arc::new(config.clone());
+
     // Build admin routes (protected by admin auth middleware)
     // Note: Different admin endpoints need different state types
     let admin_platforms_routes = Router::new()
@@ -150,10 +186,116 @@ async fn main() -> anyhow::Result<()> {
             admin_auth_middleware,
         ));
 
+    // Get postgres pool for auth endpoints
+    let postgres_pool = Arc::new(pool_manager.get_pool_by_name("postgres").await?);
+
+    // Build auth routes - split by state type
+    let auth_jwks_route = Router::new()
+        .route("/auth/jwks", get(get_jwks))
+        .with_state(jwt_service.clone());
+
+    let auth_register_route = Router::new()
+        .route("/auth/register", post(register))
+        .with_state(postgres_pool.clone())
+        .layer(axum::Extension(rate_limiters.register.clone()))
+        .layer(axum::middleware::from_fn(register_rate_limit));
+
+    let auth_login_route = Router::new()
+        .route("/auth/login", post(login))
+        .with_state((postgres_pool.clone(), jwt_service.clone()))
+        .layer(axum::Extension(rate_limiters.login.clone()))
+        .layer(axum::middleware::from_fn(login_rate_limit));
+
+    let auth_refresh_route = Router::new()
+        .route("/auth/refresh", post(refresh))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let auth_logout_route = Router::new()
+        .route("/auth/logout", post(logout))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let auth_select_tenant_route = Router::new()
+        .route("/auth/select-tenant", post(select_tenant))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let auth_switch_tenant_route = Router::new()
+        .route("/auth/switch-tenant", post(switch_tenant))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let auth_oauth_initiate_route = Router::new()
+        .route("/auth/oauth/initiate", post(oauth_initiate))
+        .with_state((config_arc.clone(), oauth_service.clone()));
+
+    let auth_oauth_callback_route = Router::new()
+        .route("/auth/oauth/callback", post(oauth_callback))
+        .with_state((postgres_pool.clone(), jwt_service.clone(), oauth_service.clone(), config_arc.clone()));
+
+    // Build account management routes
+    let account_password_reset_request_route = Router::new()
+        .route(
+            "/account/password-reset/request",
+            axum::routing::MethodRouter::new().post(password_reset_request)
+        )
+        .with_state((postgres_pool.clone(), config_arc.clone(), email_service.clone()));
+
+    let account_password_reset_confirm_route = Router::new()
+        .route("/account/password-reset/confirm", post(password_reset_confirm))
+        .with_state(postgres_pool.clone());
+
+    let account_change_password_route = Router::new()
+        .route("/account/password", axum::routing::put(change_password))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let account_oauth_connections_route = Router::new()
+        .route("/account/oauth-connections", get(get_oauth_connections))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let account_delete_oauth_connection_route = Router::new()
+        .route("/account/oauth-connections/:provider", axum::routing::delete(delete_oauth_connection))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    // Build membership routes
+    let membership_list_route = Router::new()
+        .route("/memberships", get(list_memberships))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let membership_invite_route = Router::new()
+        .route("/memberships/invite", post(invite_membership))
+        .with_state((postgres_pool.clone(), jwt_service.clone(), config_arc.clone(), email_service.clone()));
+
+    let membership_accept_route = Router::new()
+        .route("/memberships/accept-invite", post(accept_invite))
+        .with_state((postgres_pool.clone(), jwt_service.clone()));
+
+    let membership_update_route = Router::new()
+        .route("/memberships/:id", axum::routing::put(update_membership))
+        .with_state((postgres_pool, jwt_service));
+
     // Build router with legacy and new endpoints
     let app = Router::new()
         // Health check (no IP filter - for load balancer)
         .route("/health", get(health_check))
+        // Auth endpoints (no IP filter - public)
+        .merge(auth_jwks_route)
+        .merge(auth_register_route)
+        .merge(auth_login_route)
+        .merge(auth_refresh_route)
+        .merge(auth_logout_route)
+        .merge(auth_select_tenant_route)
+        .merge(auth_switch_tenant_route)
+        .merge(auth_oauth_initiate_route)
+        .merge(auth_oauth_callback_route)
+        // Account management endpoints (no IP filter - public with auth for protected endpoints)
+        .merge(account_password_reset_request_route)
+        .merge(account_password_reset_confirm_route)
+        .merge(account_change_password_route)
+        .merge(account_oauth_connections_route)
+        .merge(account_delete_oauth_connection_route)
+        // Membership endpoints (no IP filter - public with auth)
+        .merge(membership_list_route)
+        .merge(membership_invite_route)
+        .merge(membership_accept_route)
+        .merge(membership_update_route)
         // Legacy endpoints (v1 - multipart form with schema upload)
         .route("/register", post(register_schema))
         .route("/migrate", post(migrate_schema))

@@ -1,0 +1,24 @@
+-- Migration: Create identities table
+-- Order: 001
+
+-- Enable pgcrypto extension for UUID generation
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS identities (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) NOT NULL UNIQUE,
+    email_verified_at TIMESTAMPTZ,
+    password_hash VARCHAR(255),
+    status VARCHAR(50) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_login_at TIMESTAMPTZ
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_identities_email ON identities(email);
+CREATE INDEX IF NOT EXISTS idx_identities_status ON identities(status);
+CREATE INDEX IF NOT EXISTS idx_identities_email_verified_at ON identities(email_verified_at);
+
+-- Add comment
+COMMENT ON TABLE identities IS 'Core identity table for authentication and user management';

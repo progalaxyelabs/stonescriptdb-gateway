@@ -23,7 +23,7 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     export $(grep -v '^#' "$SCRIPT_DIR/.env" | xargs)
 fi
 
-GATEWAY_URL=${GATEWAY_URL:-http://192.168.122.173:9000}
+GATEWAY_URL=${GATEWAY_URL:-http://localhost:9000}
 
 # Step 1: Check gateway connectivity
 echo -e "${BLUE}Step 1: Checking Gateway Connectivity${NC}"

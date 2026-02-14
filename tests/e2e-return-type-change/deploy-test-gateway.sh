@@ -2,13 +2,13 @@
 set -e
 
 # Configuration
-REMOTE_HOST="devvmlocal"
+REMOTE_HOST="your-server"
 TEST_GATEWAY_DIR="/opt/test-stonescriptdb-gateway"
 TEST_PORT="9001"
 GATEWAY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "======================================"
-echo "Deploy Test Gateway to devvmlocal"
+echo "Deploy Test Gateway to your-server"
 echo "======================================"
 echo ""
 echo "Configuration:"
@@ -25,10 +25,10 @@ if [ ! -f "$GATEWAY_ROOT/target/release/stonescriptdb-gateway" ]; then
     cargo build --release
 fi
 
-echo "[1/5] Creating test gateway directory on devvmlocal..."
+echo "[1/5] Creating test gateway directory on your-server..."
 ssh "$REMOTE_HOST" "mkdir -p $TEST_GATEWAY_DIR/logs"
 
-echo "[2/5] Copying binary to devvmlocal..."
+echo "[2/5] Copying binary to your-server..."
 scp "$GATEWAY_ROOT/target/release/stonescriptdb-gateway" "$REMOTE_HOST:$TEST_GATEWAY_DIR/"
 
 echo "[3/5] Creating test configuration file..."
@@ -111,7 +111,7 @@ echo "Deployment Complete!"
 echo "======================================"
 echo ""
 echo "Test gateway is now running at:"
-echo "  http://192.168.122.173:$TEST_PORT"
+echo "  http://localhost:$TEST_PORT"
 echo ""
 echo "Management commands (run via SSH):"
 echo "  Start:  ssh $REMOTE_HOST '$TEST_GATEWAY_DIR/start.sh'"
@@ -120,5 +120,5 @@ echo "  Logs:   ssh $REMOTE_HOST 'tail -f $TEST_GATEWAY_DIR/logs/gateway.log'"
 echo "  Status: ssh $REMOTE_HOST 'ps aux | grep test-stonescriptdb-gateway'"
 echo ""
 echo "To run E2E test:"
-echo "  GATEWAY_URL=http://192.168.122.173:$TEST_PORT ./tests/e2e-return-type-change/test-return-type-migration.sh"
+echo "  GATEWAY_URL=http://localhost:$TEST_PORT ./tests/e2e-return-type-change/test-return-type-migration.sh"
 echo ""

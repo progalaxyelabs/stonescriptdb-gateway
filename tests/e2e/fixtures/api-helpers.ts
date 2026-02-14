@@ -40,7 +40,7 @@ export interface PasswordResetConfirmPayload {
 export class GatewayApiHelper {
   private baseUrl: string;
 
-  constructor(baseUrl: string = 'http://192.168.122.173:9000') {
+  constructor(baseUrl: string = 'http://localhost:9000') {
     this.baseUrl = baseUrl;
   }
 

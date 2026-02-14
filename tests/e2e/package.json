@@ -9,7 +9,7 @@
     "test:ui": "playwright test --ui",
     "test:debug": "playwright test --debug",
     "test:report": "playwright show-report",
-    "test:codegen": "playwright codegen http://192.168.122.173:9000"
+    "test:codegen": "playwright codegen http://localhost:9000"
   },
   "keywords": ["e2e", "playwright", "identity", "auth", "testing"],
   "author": "Progalaxy eLabs",

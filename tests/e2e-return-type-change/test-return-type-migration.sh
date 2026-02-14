@@ -16,7 +16,7 @@ echo ""
 # Configuration
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATEWAY_ROOT="$(cd "$TEST_DIR/../.." && pwd)"
-GATEWAY_URL="${GATEWAY_URL:-http://192.168.122.173:9000}"
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:9000}"
 TEST_PLATFORM="test_return_type_platform_$$"
 TEST_DB="${TEST_PLATFORM}_main"
 

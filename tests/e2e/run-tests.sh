@@ -46,7 +46,7 @@ if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
-GATEWAY_URL=${GATEWAY_URL:-http://192.168.122.173:9000}
+GATEWAY_URL=${GATEWAY_URL:-http://localhost:9000}
 
 # Check if gateway is accessible
 echo ""

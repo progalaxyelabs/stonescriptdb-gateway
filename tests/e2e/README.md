@@ -33,8 +33,8 @@ End-to-end tests for the StoneScriptDB Gateway identity system using Playwright.
 
 1. **Gateway Service Running**
    ```bash
-   # Gateway should be accessible at http://192.168.122.173:9000
-   curl http://192.168.122.173:9000/health
+   # Gateway should be accessible at http://localhost:9000
+   curl http://localhost:9000/health
    ```
 
 2. **Test Tenants Created**
@@ -134,7 +134,7 @@ tests/e2e/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `GATEWAY_URL` | Gateway base URL | `http://192.168.122.173:9000` |
+| `GATEWAY_URL` | Gateway base URL | `http://localhost:9000` |
 | `PROGALAXY_PLATFORM_CODE` | Progalaxy platform code | `progalaxy` |
 | `PROGALAXY_TENANT_SLUG` | Progalaxy test tenant | `test-tenant` |
 | `BTECHRECRUITER_PLATFORM_CODE` | BTechRecruiter platform code | `btechrecruiter` |
@@ -164,7 +164,7 @@ Reports are generated in `playwright-report/` directory.
     cd tests/e2e
     npm test
   env:
-    GATEWAY_URL: http://192.168.122.173:9000
+    GATEWAY_URL: http://localhost:9000
 
 - name: Upload test reports
   if: always()
@@ -198,8 +198,8 @@ e2e-tests:
 sudo systemctl status stonescriptdb-gateway
 
 # Check network connectivity
-ping 192.168.122.173
-curl http://192.168.122.173:9000/health
+ping localhost
+curl http://localhost:9000/health
 ```
 
 ### Test Tenants Don't Exist

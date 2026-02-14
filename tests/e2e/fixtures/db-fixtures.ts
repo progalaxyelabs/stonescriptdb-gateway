@@ -12,7 +12,7 @@ import { TestTenant, TestMembership, ROLES } from './test-data';
 export class DbFixtures {
   private baseUrl: string;
 
-  constructor(baseUrl: string = 'http://192.168.122.173:9000') {
+  constructor(baseUrl: string = 'http://localhost:9000') {
     this.baseUrl = baseUrl;
   }
 
@@ -60,7 +60,7 @@ export async function globalSetup() {
   console.log('Running global test setup...');
 
   // Verify gateway is accessible
-  const gatewayUrl = process.env.GATEWAY_URL || 'http://192.168.122.173:9000';
+  const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:9000';
 
   try {
     const response = await fetch(`${gatewayUrl}/health`);

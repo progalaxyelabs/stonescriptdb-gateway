@@ -5,7 +5,7 @@
 ### 1. Prerequisites Check
 ```bash
 # Verify gateway is running
-curl http://192.168.122.173:9000/health
+curl http://localhost:9000/health
 
 # Check Node.js
 node --version  # Should be v18+
@@ -76,7 +76,7 @@ Before running tests, ensure these tenants exist:
 - `btechrecruiter/test-company`
 
 ### Gateway URL
-Default: `http://192.168.122.173:9000`
+Default: `http://localhost:9000`
 
 To use a different URL:
 ```bash
@@ -94,8 +94,8 @@ Or edit `.env` file.
 sudo systemctl status stonescriptdb-gateway
 
 # Check connectivity
-ping 192.168.122.173
-curl http://192.168.122.173:9000/health
+ping localhost
+curl http://localhost:9000/health
 ```
 
 ### Tests Failing

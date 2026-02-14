@@ -148,7 +148,7 @@ CI=true npm test
 
 ## Prerequisites
 
-1. **Gateway Running**: Gateway must be accessible at configured URL (default: http://192.168.122.173:9000)
+1. **Gateway Running**: Gateway must be accessible at configured URL (default: http://localhost:9000)
 2. **Test Tenants Created**:
    - `progalaxy/test-tenant`
    - `btechrecruiter/test-company`

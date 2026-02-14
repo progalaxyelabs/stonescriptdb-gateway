@@ -884,10 +884,13 @@ pub async fn password_reset_request(
         let identity_id: uuid::Uuid = row.get(0);
 
         // Generate secure random token (32 bytes = 64 hex chars)
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let token_bytes: [u8; 32] = rng.gen();
-        let token = hex::encode(token_bytes);
+        // Scoped so ThreadRng (!Send) doesn't live across .await
+        let token = {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let token_bytes: [u8; 32] = rng.gen();
+            hex::encode(token_bytes)
+        };
 
         // Hash the token for storage
         let token_hash = hash_token(&token);

@@ -186,6 +186,14 @@ async fn main() -> anyhow::Result<()> {
             admin_auth_middleware,
         ));
 
+    let admin_database_routes = Router::new()
+        .route("/create", post(create_database))
+        .with_state(database_state)
+        .layer(axum::middleware::from_fn_with_state(
+            admin_auth_config.clone(),
+            admin_auth_middleware,
+        ));
+
     // Get postgres pool for auth endpoints
     let postgres_pool = Arc::new(pool_manager.get_pool_by_name("postgres").await?);
 
@@ -234,7 +242,7 @@ async fn main() -> anyhow::Result<()> {
     let account_password_reset_request_route = Router::new()
         .route(
             "/account/password-reset/request",
-            axum::routing::MethodRouter::new().post(password_reset_request)
+            post(password_reset_request),
         )
         .with_state((postgres_pool.clone(), config_arc.clone(), email_service.clone()));
 
@@ -308,20 +316,16 @@ async fn main() -> anyhow::Result<()> {
             "/platform",
             Router::new()
                 .route("/register", post(register_platform))
-                .route("/{platform}/schema", post(register_platform_schema))
-                .route("/{platform}/schemas", get(list_schemas))
-                .route("/{platform}/databases", get(list_databases))
+                .route("/:platform/schema", post(register_platform_schema))
+                .route("/:platform/schemas", get(list_schemas))
+                .route("/:platform/databases", get(list_databases))
                 .layer(ip_filter.clone())
                 .with_state(platform_state.clone()),
         )
         // Admin endpoints (protected by admin auth + IP filter)
         .nest("/admin", admin_platforms_routes)
         .nest("/admin", admin_db_routes)
-        // New database creation endpoint
-        .route(
-            "/database/create",
-            post(create_database).with_state(database_state),
-        )
+        .nest("/admin/database", admin_database_routes)
         // New migrate endpoint using stored schemas
         .route(
             "/v2/migrate",

@@ -238,6 +238,42 @@ impl IntoResponse for GatewayError {
                     cause: None,
                 },
             ),
+            GatewayError::SignatureVerificationFailed { client_id, reason } => (
+                StatusCode::UNAUTHORIZED,
+                ErrorResponse {
+                    error: "signature_verification_failed".to_string(),
+                    message: format!("Signature verification failed for client '{}'", client_id),
+                    database: None,
+                    cause: Some(reason.clone()),
+                },
+            ),
+            GatewayError::TimestampExpired { timestamp, age_seconds } => (
+                StatusCode::UNAUTHORIZED,
+                ErrorResponse {
+                    error: "timestamp_expired".to_string(),
+                    message: format!("Request timestamp {} is {} seconds old", timestamp, age_seconds),
+                    database: None,
+                    cause: None,
+                },
+            ),
+            GatewayError::UnauthorizedFunction { client_id, function } => (
+                StatusCode::FORBIDDEN,
+                ErrorResponse {
+                    error: "unauthorized_function".to_string(),
+                    message: format!("Client '{}' not allowed to call '{}'", client_id, function),
+                    database: None,
+                    cause: None,
+                },
+            ),
+            GatewayError::InvalidClientId { client_id } => (
+                StatusCode::UNAUTHORIZED,
+                ErrorResponse {
+                    error: "invalid_client_id".to_string(),
+                    message: format!("Invalid or unknown client ID: {}", client_id),
+                    database: None,
+                    cause: None,
+                },
+            ),
             GatewayError::Internal(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 ErrorResponse {

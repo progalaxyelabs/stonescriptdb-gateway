@@ -18,7 +18,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Shared state for database endpoints (includes both pool manager and platform state)
 pub struct DatabaseState {
@@ -84,17 +84,15 @@ pub async fn create_database(
         });
     }
 
-    // Get schema info
-    let schema = state
-        .platform_state
-        .schema_store
-        .get_schema(&request.platform, &request.schema_name)?;
-
-    // Generate database name: platform_schema_id
-    let db_name = format!(
-        "{}_{}_{}",
-        request.platform, request.schema_name, request.database_id
-    );
+    // Use standard naming: {platform}_{database_id} (compatible with /call routing)
+    // database_id is typically "main" or a tenant identifier (UUID, slug, etc.)
+    let db_name = if request.database_id == "main" {
+        state.pool_manager.database_name(&request.platform, None)
+    } else {
+        state
+            .pool_manager
+            .database_name(&request.platform, Some(&request.database_id))
+    };
 
     info!(
         "Creating database '{}' from schema '{}' for platform '{}'",
@@ -109,79 +107,118 @@ pub async fn create_database(
     // Create new database
     state.pool_manager.create_database(&db_name).await?;
 
-    // Get pool for this database
-    let pool = state.pool_manager.get_pool_by_name(&db_name).await?;
+    // Deploy schema — if anything fails, drop the database for atomicity
+    let deployment_result = async {
+        let pool = state.pool_manager.get_pool_by_name(&db_name).await?;
 
-    // Initialize changelog table
-    let changelog_manager = ChangelogManager::new();
-    changelog_manager
-        .ensure_changelog_table(&pool, &db_name)
-        .await?;
+        // Initialize changelog table
+        let changelog_manager = ChangelogManager::new();
+        changelog_manager
+            .ensure_changelog_table(&pool, &db_name)
+            .await?;
 
-    // Install extensions
-    let extension_manager = ExtensionManager::new();
-    let extensions_installed = extension_manager
-        .install_extensions(
-            &pool,
-            &db_name,
-            &state
-                .platform_state
-                .schema_store
-                .extensions_dir(&request.platform, &request.schema_name),
-        )
-        .await?;
+        // Install extensions
+        let extension_manager = ExtensionManager::new();
+        let extensions_installed = extension_manager
+            .install_extensions(
+                &pool,
+                &db_name,
+                &state
+                    .platform_state
+                    .schema_store
+                    .extensions_dir(&request.platform, &request.schema_name),
+            )
+            .await?;
 
-    // Deploy custom types
-    let type_manager = CustomTypeManager::new();
-    let types_deployed = type_manager
-        .deploy_types(
-            &pool,
-            &db_name,
-            &state
-                .platform_state
-                .schema_store
-                .types_dir(&request.platform, &request.schema_name),
-        )
-        .await?;
+        // Deploy custom types
+        let type_manager = CustomTypeManager::new();
+        let types_deployed = type_manager
+            .deploy_types(
+                &pool,
+                &db_name,
+                &state
+                    .platform_state
+                    .schema_store
+                    .types_dir(&request.platform, &request.schema_name),
+            )
+            .await?;
 
-    // Create tables from declarative schema
-    let table_deployer = TableDeployer::new();
-    let tables_created = table_deployer
-        .deploy_tables(
-            &pool,
-            &db_name,
-            &state
-                .platform_state
-                .schema_store
-                .tables_dir(&request.platform, &request.schema_name),
-        )
-        .await?;
+        // Create tables from declarative schema
+        let table_deployer = TableDeployer::new();
+        let tables_created = table_deployer
+            .deploy_tables(
+                &pool,
+                &db_name,
+                &state
+                    .platform_state
+                    .schema_store
+                    .tables_dir(&request.platform, &request.schema_name),
+            )
+            .await?;
 
-    // Deploy functions
-    let function_deployer = FunctionDeployer::new();
-    let functions_deployed = function_deployer
-        .deploy_functions(
-            &pool,
-            &db_name,
-            &state
-                .platform_state
-                .schema_store
-                .functions_dir(&request.platform, &request.schema_name),
-        )
-        .await?;
+        // Deploy functions
+        let function_deployer = FunctionDeployer::new();
+        let functions_deployed = function_deployer
+            .deploy_functions(
+                &pool,
+                &db_name,
+                &state
+                    .platform_state
+                    .schema_store
+                    .functions_dir(&request.platform, &request.schema_name),
+            )
+            .await?;
 
-    // Run seeders
-    let seeder_runner = SeederRunner::new();
-    let seeder_results = seeder_runner
-        .run_seeders_on_register(
-            &pool,
-            &db_name,
-            &state
-                .platform_state
-                .schema_store
-                .seeders_dir(&request.platform, &request.schema_name),
-        )
-        .await?;
+        // Run seeders
+        let seeder_runner = SeederRunner::new();
+        let seeder_results = seeder_runner
+            .run_seeders_on_register(
+                &pool,
+                &db_name,
+                &state
+                    .platform_state
+                    .schema_store
+                    .seeders_dir(&request.platform, &request.schema_name),
+            )
+            .await?;
+
+        Ok::<_, GatewayError>((
+            pool,
+            changelog_manager,
+            extensions_installed,
+            types_deployed,
+            tables_created,
+            functions_deployed,
+            seeder_results,
+        ))
+    }
+    .await;
+
+    // Handle deployment result — drop DB on failure for atomicity
+    let (
+        pool,
+        changelog_manager,
+        extensions_installed,
+        types_deployed,
+        tables_created,
+        functions_deployed,
+        seeder_results,
+    ) = match deployment_result {
+        Ok(data) => data,
+        Err(e) => {
+            warn!(
+                "Schema deployment failed for '{}', dropping database: {}",
+                db_name, e
+            );
+            if let Err(drop_err) = state.pool_manager.drop_database(&db_name).await {
+                warn!(
+                    "Failed to drop database '{}' after deployment failure: {}",
+                    db_name, drop_err
+                );
+            }
+            return Err(e);
+        }
+    };
 
     let seeders: Vec<SeederInfo> = seeder_results
         .into_iter()

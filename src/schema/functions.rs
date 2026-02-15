@@ -129,19 +129,52 @@ impl FunctionDeployer {
         // Remove comments
         let sql = self.remove_comments(sql);
 
-        // Match CREATE [OR REPLACE] FUNCTION name(params) RETURNS type
-        let re = regex::Regex::new(
-            r"(?is)CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(\w+)\s*\(([^)]*)\)\s*RETURNS\s+((?:TABLE\s*\([^)]+\)|\S+))"
+        // Step 1: Find CREATE [OR REPLACE] FUNCTION name
+        let name_re = regex::Regex::new(
+            r"(?is)CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(\w+)\s*\("
         ).unwrap();
 
-        let caps = re.captures(&sql)?;
+        let name_caps = name_re.captures(&sql)?;
+        let name = name_caps[1].to_lowercase();
 
-        let name = caps[1].to_lowercase();
-        let params_str = &caps[2];
-        let return_type = caps[3].trim().to_uppercase();
+        // Step 2: Find the opening paren position after function name, then
+        // extract the parameter list by matching balanced parentheses
+        let name_match = name_re.find(&sql)?;
+        let paren_start = name_match.end() - 1; // position of '('
+        let params_str = self.extract_balanced_parens(&sql[paren_start..])?;
+
+        // Step 3: Find RETURNS clause after the parameter list
+        let after_params_pos = paren_start + params_str.len() + 2; // +2 for the outer ( and )
+        let remaining = &sql[after_params_pos..];
+
+        let returns_re = regex::Regex::new(
+            r"(?is)^\s*RETURNS\s+(TABLE\s*\(|SETOF\s+\S+|\S+)"
+        ).unwrap();
+
+        let return_type = if let Some(ret_caps) = returns_re.captures(remaining) {
+            let ret_match = ret_caps[1].trim().to_uppercase();
+            if ret_match.starts_with("TABLE") {
+                // Extract the full TABLE(...) return type with balanced parens
+                let table_re = regex::Regex::new(r"(?is)^\s*RETURNS\s+TABLE\s*\(").unwrap();
+                if let Some(table_match) = table_re.find(remaining) {
+                    let table_paren_start = table_match.end() - 1;
+                    if let Some(table_content) = self.extract_balanced_parens(&remaining[table_paren_start..]) {
+                        format!("TABLE({})", table_content)
+                    } else {
+                        ret_match
+                    }
+                } else {
+                    ret_match
+                }
+            } else {
+                ret_match
+            }
+        } else {
+            return None;
+        };
 
         // Parse parameters
-        let parameters = self.parse_parameters(params_str);
+        let parameters = self.parse_parameters(&params_str);
 
         // Compute body checksum
         let body_checksum = self.compute_body_checksum(&sql);
@@ -152,6 +185,36 @@ impl FunctionDeployer {
             return_type,
             body_checksum,
         })
+    }
+
+    /// Extract content between balanced parentheses.
+    /// Input should start with '('. Returns the content inside (excluding outer parens).
+    fn extract_balanced_parens(&self, s: &str) -> Option<String> {
+        let chars: Vec<char> = s.chars().collect();
+        if chars.is_empty() || chars[0] != '(' {
+            return None;
+        }
+
+        let mut depth = 0;
+        let mut start = 0;
+        for (i, &ch) in chars.iter().enumerate() {
+            match ch {
+                '(' => {
+                    if depth == 0 {
+                        start = i + 1;
+                    }
+                    depth += 1;
+                }
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(chars[start..i].iter().collect());
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// Parse function parameters
@@ -389,13 +452,13 @@ impl FunctionDeployer {
         Ok(deployed)
     }
 
-    /// Check if function needs to be deployed (checksum changed)
+    /// Check if function needs to be deployed (checksum changed or function missing from pg_proc)
     async fn check_needs_deploy(
         &self,
         client: &deadpool_postgres::Object,
-        _database: &str,
+        database: &str,
         signature: &FunctionSignature,
-        _file_name: &str,
+        file_name: &str,
     ) -> Result<bool> {
         let param_types: Vec<String> = signature
             .parameters
@@ -410,12 +473,57 @@ impl FunctionDeployer {
                 &[&signature.name, &param_types],
             )
             .await
-            .unwrap_or(None);
+            .map_err(|e| {
+                warn!(
+                    "Failed to query tracking table for function {} in {}: {}",
+                    signature.name, database, e
+                );
+                GatewayError::FunctionDeployFailed {
+                    database: database.to_string(),
+                    function: file_name.to_string(),
+                    cause: format!("Failed to query tracking table: {}", e),
+                }
+            })?;
 
         match row {
             Some(row) => {
                 let stored_checksum: String = row.get(0);
-                Ok(stored_checksum != signature.body_checksum)
+                if stored_checksum != signature.body_checksum {
+                    return Ok(true); // Checksum changed, needs deploy
+                }
+
+                // Checksum matches — but verify the function actually exists in pg_proc.
+                // Functions can disappear from pg_proc due to DB restore, manual DROP,
+                // or other external events. If the function is missing, force re-deploy.
+                let exists = client
+                    .query_opt(
+                        "SELECT 1 FROM pg_proc
+                         WHERE proname = $1
+                         AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')",
+                        &[&signature.name],
+                    )
+                    .await
+                    .map_err(|e| {
+                        warn!(
+                            "Failed to verify function {} exists in pg_proc for {}: {}",
+                            signature.name, database, e
+                        );
+                        GatewayError::FunctionDeployFailed {
+                            database: database.to_string(),
+                            function: file_name.to_string(),
+                            cause: format!("Failed to verify function in pg_proc: {}", e),
+                        }
+                    })?;
+
+                if exists.is_none() {
+                    warn!(
+                        "Function {} is tracked but missing from pg_proc in {} — forcing re-deploy",
+                        signature.name, database
+                    );
+                    Ok(true) // Missing from pg_proc, needs re-deploy
+                } else {
+                    Ok(false) // Exists and checksum matches, skip
+                }
             }
             None => Ok(true), // Not tracked yet, needs deploy
         }
@@ -518,7 +626,7 @@ impl FunctionDeployer {
     async fn update_tracking(
         &self,
         client: &deadpool_postgres::Object,
-        _database: &str,
+        database: &str,
         signature: &FunctionSignature,
         file_name: &str,
     ) -> Result<()> {
@@ -528,7 +636,7 @@ impl FunctionDeployer {
             .map(|p| p.data_type.clone())
             .collect();
 
-        client
+        if let Err(e) = client
             .execute(
                 r#"
                 INSERT INTO _stonescriptdb_gateway_functions
@@ -552,7 +660,13 @@ impl FunctionDeployer {
                 ],
             )
             .await
-            .ok();
+        {
+            warn!(
+                "Failed to update tracking for function {} in {}: {}",
+                signature.name, database, e
+            );
+            // Non-fatal: the function was deployed successfully, tracking is secondary
+        }
 
         Ok(())
     }
@@ -809,6 +923,134 @@ mod tests {
 
         // Both should have identical checksums (case normalized)
         assert_eq!(sig_upper.body_checksum, sig_lower.body_checksum);
+    }
+
+    #[test]
+    fn test_parse_parameterized_types() {
+        let deployer = FunctionDeployer::new();
+
+        // Function with VARCHAR(255), DECIMAL(5,2) in parameters
+        let sql = r#"
+            CREATE OR REPLACE FUNCTION create_item(
+                p_name VARCHAR(255),
+                p_generic_name VARCHAR(255) DEFAULT NULL,
+                p_gst_percentage DECIMAL(5,2) DEFAULT 0
+            )
+            RETURNS TABLE(
+                item_id INTEGER,
+                batch_id INTEGER,
+                name VARCHAR(255),
+                gst_percentage DECIMAL(5,2)
+            )
+            LANGUAGE plpgsql
+            AS $$ BEGIN END; $$;
+        "#;
+
+        let sig = deployer.parse_signature(sql).unwrap();
+        assert_eq!(sig.name, "create_item");
+        assert_eq!(sig.parameters.len(), 3);
+        assert_eq!(sig.parameters[0].name, Some("p_name".to_string()));
+        assert_eq!(sig.parameters[0].data_type, "VARCHAR(255)");
+        assert_eq!(sig.parameters[2].data_type, "DECIMAL(5,2)");
+        assert!(sig.parameters[2].has_default);
+        assert!(sig.return_type.contains("VARCHAR(255)"));
+    }
+
+    #[test]
+    fn test_parse_numeric_types() {
+        let deployer = FunctionDeployer::new();
+
+        // Function with NUMERIC(15,3) in parameters
+        let sql = r#"
+            CREATE OR REPLACE FUNCTION deplete_stock_fifo(
+                p_item_price_id INTEGER,
+                p_quantity_needed NUMERIC(15,3),
+                p_bill_detail_id INTEGER
+            )
+            RETURNS VOID AS $$
+            BEGIN END;
+            $$ LANGUAGE plpgsql;
+        "#;
+
+        let sig = deployer.parse_signature(sql).unwrap();
+        assert_eq!(sig.name, "deplete_stock_fifo");
+        assert_eq!(sig.parameters.len(), 3);
+        assert_eq!(sig.parameters[1].data_type, "NUMERIC(15,3)");
+        assert_eq!(sig.return_type, "VOID");
+    }
+
+    #[test]
+    fn test_parse_drop_then_create() {
+        let deployer = FunctionDeployer::new();
+
+        // SQL file with DROP FUNCTION followed by CREATE
+        let sql = r#"
+            DROP FUNCTION IF EXISTS get_admin_stats();
+            CREATE OR REPLACE FUNCTION get_admin_stats()
+            RETURNS TABLE (
+                o_total_items bigint,
+                o_active_items bigint
+            ) AS $$
+            BEGIN END;
+            $$ LANGUAGE plpgsql STABLE;
+        "#;
+
+        let sig = deployer.parse_signature(sql).unwrap();
+        assert_eq!(sig.name, "get_admin_stats");
+        assert!(sig.parameters.is_empty());
+    }
+
+    #[test]
+    fn test_parse_returns_json() {
+        let deployer = FunctionDeployer::new();
+
+        let sql = r#"
+            CREATE OR REPLACE FUNCTION create_vendor_invoice(p_invoice_data TEXT)
+            RETURNS JSON
+            LANGUAGE plpgsql
+            AS $$ BEGIN END; $$;
+        "#;
+
+        let sig = deployer.parse_signature(sql).unwrap();
+        assert_eq!(sig.name, "create_vendor_invoice");
+        assert_eq!(sig.parameters.len(), 1);
+        assert_eq!(sig.parameters[0].data_type, "TEXT");
+        assert_eq!(sig.return_type, "JSON");
+    }
+
+    #[test]
+    fn test_extract_balanced_parens() {
+        let deployer = FunctionDeployer::new();
+
+        // Simple case
+        assert_eq!(
+            deployer.extract_balanced_parens("(a, b, c)"),
+            Some("a, b, c".to_string())
+        );
+
+        // Nested parentheses
+        assert_eq!(
+            deployer.extract_balanced_parens("(p_name VARCHAR(255), p_gst DECIMAL(5,2))"),
+            Some("p_name VARCHAR(255), p_gst DECIMAL(5,2)".to_string())
+        );
+
+        // Empty parens
+        assert_eq!(
+            deployer.extract_balanced_parens("()"),
+            Some("".to_string())
+        );
+
+        // Deeply nested
+        assert_eq!(
+            deployer.extract_balanced_parens("(TABLE(id INTEGER, name VARCHAR(50)))"),
+            Some("TABLE(id INTEGER, name VARCHAR(50))".to_string())
+        );
+
+        // Invalid - no opening paren
+        assert_eq!(deployer.extract_balanced_parens("no parens"), None);
+
+        // Invalid - unbalanced
+        assert_eq!(deployer.extract_balanced_parens("(unclosed"), None);
     }
 
     #[test]

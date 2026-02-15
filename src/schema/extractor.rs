@@ -65,13 +65,13 @@ impl SchemaExtractor {
     }
 
     fn find_postgresql_subdir(&self, subdir: &str) -> PathBuf {
-        // First try: direct postgresql/<subdir>
+        // First try: direct postgresql/<subdir> (flat layout)
         let direct = self.extracted_path.join("postgresql").join(subdir);
         if direct.exists() {
             return direct;
         }
 
-        // Second try: look for a directory named postgresql at any level
+        // Second try: look one level deep — <entry>/postgresql/<subdir>
         if let Ok(entries) = fs::read_dir(&self.extracted_path) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -86,6 +86,25 @@ impl SchemaExtractor {
                         if sub.exists() {
                             return sub;
                         }
+                        // Third try: two levels deep — postgresql/<child>/postgresql/<subdir>
+                        // Handles nested layout: postgresql/{tenant,main}/postgresql/{tables,functions,...}
+                        if let Ok(sub_entries) = fs::read_dir(&path) {
+                            for sub_entry in sub_entries.flatten() {
+                                let sub_path = sub_entry.path();
+                                if sub_path.is_dir() {
+                                    let nested = sub_path.join("postgresql").join(subdir);
+                                    if nested.exists() {
+                                        debug!(
+                                            "Found nested schema: {:?}/{}/postgresql/{}",
+                                            sub_entry.file_name(),
+                                            "postgresql",
+                                            subdir
+                                        );
+                                        return nested;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -96,6 +115,12 @@ impl SchemaExtractor {
     }
 
     pub fn list_pssql_files(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        self.list_sql_files(dir)
+    }
+
+    /// List all SQL schema files in a directory.
+    /// Supports .pssql, .pgsql, and .sql extensions.
+    pub fn list_sql_files(&self, dir: &Path) -> Result<Vec<PathBuf>> {
         if !dir.exists() {
             debug!("Directory {:?} does not exist, returning empty list", dir);
             return Ok(Vec::new());
@@ -113,7 +138,7 @@ impl SchemaExtractor {
             let path = entry.path();
             if path.is_file() {
                 if let Some(ext) = path.extension() {
-                    if ext == "pssql" {
+                    if ext == "pssql" || ext == "pgsql" || ext == "sql" {
                         files.push(path);
                     }
                 }

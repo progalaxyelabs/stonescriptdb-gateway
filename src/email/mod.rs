@@ -258,6 +258,9 @@ mod tests {
             smtp_from_email: Some("test@example.com".to_string()),
             smtp_from_name: Some("Test Gateway".to_string()),
             email_dev_mode: true,
+            google_client_id: None,
+            google_client_secret: None,
+            frontend_url: None,
         };
 
         let service = EmailService::new(config).unwrap();

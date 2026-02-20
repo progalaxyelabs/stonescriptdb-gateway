@@ -12,10 +12,10 @@ use crate::api::{
     accept_invite, admin_create_tenant, admin_list_databases, call_function, change_password,
     create_database, delete_oauth_connection, get_jwks, get_oauth_connections, health_check,
     invite_membership, list_databases, list_memberships, list_platforms, list_schemas, login,
-    logout, migrate_schema, migrate_schema_v2, oauth_callback, oauth_initiate,
+    logout, migrate_all_schema_v2, migrate_schema_v2, oauth_callback, oauth_initiate,
     password_reset_confirm, password_reset_request, refresh, register, register_platform,
-    register_platform_schema, register_schema, select_tenant, switch_tenant, update_membership,
-    DatabaseState, MigrateV2State, PlatformState,
+    register_platform_schema, select_tenant, switch_tenant, update_membership, DatabaseState,
+    MigrateV2State, PlatformState,
 };
 use crate::auth::jwt::JwtService;
 use crate::auth::oauth::OAuthService;
@@ -304,9 +304,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(membership_invite_route)
         .merge(membership_accept_route)
         .merge(membership_update_route)
-        // Legacy endpoints (v1 - multipart form with schema upload)
-        .route("/register", post(register_schema))
-        .route("/migrate", post(migrate_schema))
+        // Function call endpoint (version-agnostic)
         .route("/call", post(call_function))
         .layer(ip_filter.clone())
         .layer(TraceLayer::new_for_http())
@@ -326,10 +324,14 @@ async fn main() -> anyhow::Result<()> {
         .nest("/admin", admin_platforms_routes)
         .nest("/admin", admin_db_routes)
         .nest("/admin/database", admin_database_routes)
-        // New migrate endpoint using stored schemas
+        // Migrate endpoints using stored schemas
         .route(
             "/v2/migrate",
-            post(migrate_schema_v2).with_state(migrate_v2_state),
+            post(migrate_schema_v2).with_state(migrate_v2_state.clone()),
+        )
+        .route(
+            "/v2/migrate-all",
+            post(migrate_all_schema_v2).with_state(migrate_v2_state),
         );
 
     // Spawn cleanup task for idle pools

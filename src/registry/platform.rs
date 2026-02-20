@@ -95,8 +95,8 @@ impl PlatformRegistry {
 
         // Check if already registered
         if self.is_registered(platform) {
-            return Err(GatewayError::InvalidRequest {
-                message: format!("Platform '{}' is already registered", platform),
+            return Err(GatewayError::PlatformAlreadyRegistered {
+                platform: platform.to_string(),
             });
         }
 

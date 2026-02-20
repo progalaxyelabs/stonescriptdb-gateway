@@ -17,6 +17,9 @@ pub enum GatewayError {
     #[error("Database already exists: {database}")]
     DatabaseAlreadyExists { database: String },
 
+    #[error("Platform already registered: {platform}")]
+    PlatformAlreadyRegistered { platform: String },
+
     #[error("Migration failed in {database}: {migration} - {cause}")]
     MigrationFailed {
         database: String,
@@ -122,6 +125,15 @@ impl IntoResponse for GatewayError {
                     error: "database_already_exists".to_string(),
                     message: format!("Database '{}' already exists", database),
                     database: Some(database.clone()),
+                    cause: None,
+                },
+            ),
+            GatewayError::PlatformAlreadyRegistered { platform } => (
+                StatusCode::CONFLICT,
+                ErrorResponse {
+                    error: "platform_already_registered".to_string(),
+                    message: format!("Platform '{}' is already registered", platform),
+                    database: None,
                     cause: None,
                 },
             ),

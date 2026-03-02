@@ -7,6 +7,9 @@ Cargo.lock
 Dockerfile.build
 Dockerfile.local
 
+# Infrastructure-specific deployment scripts (copy from *.example and configure locally)
+deploy.sh
+
 # Environment
 .env
 .env.local

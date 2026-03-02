@@ -47,7 +47,7 @@ A single Rust service that:
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                     DB Gateway (vm-postgres-primary)                     │
+│                        DB Gateway (postgres-host)                        │
 │                                                                          │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                      Rust Service (port 9000)                      │  │

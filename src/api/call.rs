@@ -1,11 +1,19 @@
 use crate::error::{extract_db_error, GatewayError, Result};
 use crate::pool::PoolManager;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 use tracing::{debug, error};
+
+// Cache for function param types to avoid per-call DB lookups.
+// Key: "{db_name}:{function_name}", Value: (param_types, cached_at)
+static PARAM_TYPE_CACHE: LazyLock<DashMap<String, (Vec<String>, Instant)>> =
+    LazyLock::new(DashMap::new);
+
+const CACHE_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
 #[derive(Debug, Deserialize)]
 pub struct CallRequest {
@@ -79,25 +87,105 @@ pub async fn call_function(
                 }
             })?
     } else {
-        // Build inline SQL with properly escaped/typed values
-        // This is safe because we validate the function name and use proper JSON serialization
+        // Look up registered param types for type-aware casting.
+        // Cache key includes db_name to avoid cross-platform collisions.
+        let cache_key = format!("{}:{}", db_name, request.function);
+        let param_types: Option<Vec<String>> = {
+            let cached = PARAM_TYPE_CACHE
+                .get(&cache_key)
+                .and_then(|entry| {
+                    if entry.1.elapsed() < CACHE_TTL {
+                        Some(entry.0.clone())
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some(types) = cached {
+                Some(types)
+            } else {
+                // Query the gateway functions registry.
+                // Errors are swallowed — fall back to naive type inference.
+                client
+                    .query_opt(
+                        "SELECT param_types FROM _stonescriptdb_gateway_functions \
+                         WHERE function_name = $1 LIMIT 1",
+                        &[&request.function],
+                    )
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|row| {
+                        let types: Vec<String> = row.get(0);
+                        PARAM_TYPE_CACHE.insert(cache_key, (types.clone(), Instant::now()));
+                        types
+                    })
+            }
+        };
+
+        // Build inline SQL with properly escaped/typed values.
+        // This is safe because we validate the function name and use proper JSON serialization.
         let param_values: Vec<String> = request
             .params
             .iter()
-            .map(|v| match v {
-                Value::Null => "NULL".to_string(),
-                Value::Bool(b) => b.to_string(),
-                Value::Number(n) => n.to_string(),
-                Value::String(s) => {
-                    // Escape single quotes for SQL
-                    let escaped = s.replace('\'', "''");
-                    format!("'{}'", escaped)
-                }
-                Value::Array(_) | Value::Object(_) => {
-                    // For complex types, pass as JSONB
-                    let json_str = serde_json::to_string(v).unwrap_or_default();
-                    let escaped = json_str.replace('\'', "''");
-                    format!("'{}'::jsonb", escaped)
+            .enumerate()
+            .map(|(i, v)| {
+                let registered_type = param_types
+                    .as_ref()
+                    .and_then(|types| types.get(i))
+                    .map(|t| t.as_str());
+
+                match v {
+                    Value::Null => "NULL".to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Number(n) => n.to_string(),
+                    Value::String(s) => {
+                        // Escape single quotes for SQL
+                        let escaped = s.replace('\'', "''");
+                        match registered_type {
+                            // Cast non-text types explicitly (e.g. timestamptz, uuid)
+                            Some(t) if t != "text" && t != "varchar" && !t.is_empty() => {
+                                format!("'{}'::{}", escaped, t)
+                            }
+                            _ => format!("'{}'", escaped),
+                        }
+                    }
+                    Value::Array(arr) => {
+                        match registered_type {
+                            Some("bytea") => {
+                                // JSON array of u8 values → PostgreSQL bytea hex literal
+                                let bytes: Vec<u8> = arr
+                                    .iter()
+                                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                                    .collect();
+                                let hex = bytes
+                                    .iter()
+                                    .map(|b| format!("{:02x}", b))
+                                    .collect::<String>();
+                                format!("'\\x{}'::bytea", hex)
+                            }
+                            Some(t) => {
+                                // Registered array type (text[], integer[], etc.) or other type
+                                let json_str = serde_json::to_string(v).unwrap_or_default();
+                                let escaped = json_str.replace('\'', "''");
+                                format!("'{}'::{}", escaped, t)
+                            }
+                            None => {
+                                // Fallback: jsonb (existing behavior for unregistered functions)
+                                let json_str = serde_json::to_string(v).unwrap_or_default();
+                                let escaped = json_str.replace('\'', "''");
+                                format!("'{}'::jsonb", escaped)
+                            }
+                        }
+                    }
+                    Value::Object(_) => {
+                        let json_str = serde_json::to_string(v).unwrap_or_default();
+                        let escaped = json_str.replace('\'', "''");
+                        match registered_type {
+                            Some(t) => format!("'{}'::{}", escaped, t),
+                            None => format!("'{}'::jsonb", escaped),
+                        }
+                    }
                 }
             })
             .collect();
@@ -272,5 +360,14 @@ mod tests {
         assert!(!is_valid_function_name("DROP TABLE users; --")); // SQL injection
         assert!(!is_valid_function_name("Get_Patient")); // Contains uppercase
         assert!(!is_valid_function_name("123_fn")); // Starts with number
+    }
+
+    #[test]
+    fn test_bytea_hex_encoding() {
+        // Simulate what the bytea casting code does for [72, 101, 108, 108, 111] → "Hello"
+        let bytes: Vec<u8> = vec![72, 101, 108, 108, 111];
+        let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        assert_eq!(hex, "48656c6c6f");
+        assert_eq!(format!("'\\x{}'::bytea", hex), "'\\x48656c6c6f'::bytea");
     }
 }

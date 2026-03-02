@@ -26,7 +26,7 @@ test.describe('User Registration', () => {
 
   test('should register user with platform and tenant', async () => {
     const user = createTestUser();
-    const tenant = TEST_TENANTS[0]; // progalaxy/test-tenant
+    const tenant = TEST_TENANTS[0];
 
     const response = await api.register({
       email: user.email,
@@ -84,7 +84,7 @@ test.describe('User Registration', () => {
       api.register({
         email: user.email,
         password: user.password,
-        platform_code: 'progalaxy',
+        platform_code: TEST_TENANTS[0].platform_code,
         tenant_slug: 'non-existent-tenant-xyz',
       })
     ).rejects.toThrow(/does not exist/i);

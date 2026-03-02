@@ -68,7 +68,7 @@ test.describe('User Login', () => {
       api.login({
         email: 'nonexistent@example.com',
         password: 'SomePassword123!',
-        platform_code: 'progalaxy',
+        platform_code: TEST_TENANTS[0].platform_code,
       })
     ).rejects.toThrow(/invalid|credentials|not found/i);
   });
@@ -144,7 +144,7 @@ test.describe('User Login', () => {
   test('should preserve identity across platforms', async () => {
     const user = createTestUser();
 
-    // Register on progalaxy platform
+    // Register on first platform
     const regResponse1 = await api.register({
       email: user.email,
       password: user.password,
@@ -152,7 +152,7 @@ test.describe('User Login', () => {
       tenant_slug: TEST_TENANTS[0].slug,
     });
 
-    // Register same user on btechrecruiter platform
+    // Register same user on second platform
     const regResponse2 = await api.register({
       email: user.email,
       password: user.password,

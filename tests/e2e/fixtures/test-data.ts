@@ -39,18 +39,24 @@ export function generatePassword(): string {
   return `TestPass${Math.floor(Math.random() * 100000)}!`;
 }
 
+// Read platform configs from environment (set in .env, see .env.example)
+const app1PlatformCode = process.env.APP1_PLATFORM_CODE || 'myapp';
+const app1TenantSlug = process.env.APP1_TENANT_SLUG || 'test-tenant';
+const app2PlatformCode = process.env.APP2_PLATFORM_CODE || 'otherapp';
+const app2TenantSlug = process.env.APP2_TENANT_SLUG || 'test-company';
+
 /**
- * Default test tenants
+ * Default test tenants — configured via APP1_* and APP2_* env vars in .env
  */
 export const TEST_TENANTS: TestTenant[] = [
   {
-    platform_code: 'progalaxy',
-    slug: 'test-tenant',
+    platform_code: app1PlatformCode,
+    slug: app1TenantSlug,
     name: 'Test Tenant',
   },
   {
-    platform_code: 'btechrecruiter',
-    slug: 'test-company',
+    platform_code: app2PlatformCode,
+    slug: app2TenantSlug,
     name: 'Test Company',
   },
 ];
@@ -88,22 +94,22 @@ export const ROLES = {
 export const MULTI_TENANT_SCENARIOS = {
   SINGLE_PLATFORM_SINGLE_TENANT: {
     description: 'User belongs to one tenant on one platform',
-    platforms: ['progalaxy'],
+    platforms: [app1PlatformCode],
     tenantsPerPlatform: 1,
   },
   SINGLE_PLATFORM_MULTI_TENANT: {
     description: 'User belongs to multiple tenants on same platform',
-    platforms: ['progalaxy'],
+    platforms: [app1PlatformCode],
     tenantsPerPlatform: 3,
   },
   MULTI_PLATFORM_SINGLE_TENANT: {
     description: 'User belongs to one tenant on each platform',
-    platforms: ['progalaxy', 'btechrecruiter'],
+    platforms: [app1PlatformCode, app2PlatformCode],
     tenantsPerPlatform: 1,
   },
   MULTI_PLATFORM_MULTI_TENANT: {
     description: 'User belongs to multiple tenants on multiple platforms',
-    platforms: ['progalaxy', 'btechrecruiter'],
+    platforms: [app1PlatformCode, app2PlatformCode],
     tenantsPerPlatform: 2,
   },
 };

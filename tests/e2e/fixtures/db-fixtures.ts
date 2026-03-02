@@ -75,8 +75,8 @@ export async function globalSetup() {
 
   // Note: Tenant creation should be done via setup scripts, not in tests
   console.log('⚠ Ensure test tenants are created manually:');
-  console.log('  - progalaxy/test-tenant');
-  console.log('  - btechrecruiter/test-company');
+  console.log(`  - ${process.env.APP1_PLATFORM_CODE || 'myapp'}/${process.env.APP1_TENANT_SLUG || 'test-tenant'}`);
+  console.log(`  - ${process.env.APP2_PLATFORM_CODE || 'otherapp'}/${process.env.APP2_TENANT_SLUG || 'test-company'}`);
 
   console.log('Global setup complete');
 }

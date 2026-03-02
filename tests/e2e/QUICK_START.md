@@ -71,9 +71,9 @@ npm run test:report      # Open HTML report
 ## ⚠️ Important Notes
 
 ### Required Test Tenants
-Before running tests, ensure these tenants exist:
-- `progalaxy/test-tenant`
-- `btechrecruiter/test-company`
+Before running tests, ensure these tenants exist (set via `APP1_*` and `APP2_*` in `.env`):
+- `{APP1_PLATFORM_CODE}/{APP1_TENANT_SLUG}` (default: `myapp/test-tenant`)
+- `{APP2_PLATFORM_CODE}/{APP2_TENANT_SLUG}` (default: `otherapp/test-company`)
 
 ### Gateway URL
 Default: `http://localhost:9000`

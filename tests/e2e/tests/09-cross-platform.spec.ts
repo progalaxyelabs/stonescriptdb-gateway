@@ -12,19 +12,19 @@ test.describe('Cross-Platform Identity', () => {
   test('should use same identity_id across platforms', async () => {
     const user = createTestUser();
 
-    // Register on progalaxy platform
+    // Register on first platform
     const reg1 = await api.register({
       email: user.email,
       password: user.password,
-      platform_code: TEST_TENANTS[0].platform_code, // progalaxy
+      platform_code: TEST_TENANTS[0].platform_code,
       tenant_slug: TEST_TENANTS[0].slug,
     });
 
-    // Register same user on btechrecruiter platform
+    // Register same user on second platform
     const reg2 = await api.register({
       email: user.email,
       password: user.password,
-      platform_code: TEST_TENANTS[1].platform_code, // btechrecruiter
+      platform_code: TEST_TENANTS[1].platform_code,
       tenant_slug: TEST_TENANTS[1].slug,
     });
 
@@ -169,7 +169,7 @@ test.describe('Cross-Platform Identity', () => {
   test('should handle user registered on one platform logging into another', async () => {
     const user = createTestUser();
 
-    // Register ONLY on progalaxy
+    // Register ONLY on first platform
     const regResponse = await api.register({
       email: user.email,
       password: user.password,
@@ -177,7 +177,7 @@ test.describe('Cross-Platform Identity', () => {
       tenant_slug: TEST_TENANTS[0].slug,
     });
 
-    // Try to login on btechrecruiter (user exists but has no tenants there)
+    // Try to login on second platform (user exists but has no tenants there)
     const login2 = await api.login({
       email: user.email,
       password: user.password,
@@ -217,8 +217,8 @@ test.describe('Cross-Platform Identity', () => {
 
   test('should support OAuth linking across platforms', async () => {
     // This would test:
-    // 1. User links Google account on progalaxy
-    // 2. Can use Google OAuth on btechrecruiter
+    // 1. User links Google account on platform 1
+    // 2. Can use Google OAuth on platform 2
     // 3. Same identity_id
 
     test.skip();
@@ -231,7 +231,7 @@ test.describe('Cross-Platform Identity', () => {
   test('should handle user with multiple tenants across platforms', async () => {
     const user = createTestUser();
 
-    // Register on progalaxy - tenant 1
+    // Register on first platform
     await api.register({
       email: user.email,
       password: user.password,
@@ -239,7 +239,7 @@ test.describe('Cross-Platform Identity', () => {
       tenant_slug: TEST_TENANTS[0].slug,
     });
 
-    // Register on btechrecruiter - tenant 2
+    // Register on second platform
     await api.register({
       email: user.email,
       password: user.password,
@@ -247,7 +247,7 @@ test.describe('Cross-Platform Identity', () => {
       tenant_slug: TEST_TENANTS[1].slug,
     });
 
-    // Login on progalaxy - should show progalaxy tenants
+    // Login on first platform - should show first platform tenants
     const login1 = await api.login({
       email: user.email,
       password: user.password,
@@ -257,7 +257,7 @@ test.describe('Cross-Platform Identity', () => {
     expect(login1.tenants.length).toBe(1);
     expect(login1.tenants[0].platform_code).toBe(TEST_TENANTS[0].platform_code);
 
-    // Login on btechrecruiter - should show btechrecruiter tenants
+    // Login on second platform - should show second platform tenants
     const login2 = await api.login({
       email: user.email,
       password: user.password,

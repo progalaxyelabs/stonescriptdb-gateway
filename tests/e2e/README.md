@@ -37,9 +37,7 @@ End-to-end tests for the StoneScriptDB Gateway identity system using Playwright.
    curl http://localhost:9000/health
    ```
 
-2. **Test Tenants Created**
-   - `progalaxy/test-tenant`
-   - `btechrecruiter/test-company`
+2. **Test Tenants Created** (matching your `APP1_*` and `APP2_*` env vars)
 
 3. **Node.js and npm**
    ```bash
@@ -135,10 +133,10 @@ tests/e2e/
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GATEWAY_URL` | Gateway base URL | `http://localhost:9000` |
-| `PROGALAXY_PLATFORM_CODE` | Progalaxy platform code | `progalaxy` |
-| `PROGALAXY_TENANT_SLUG` | Progalaxy test tenant | `test-tenant` |
-| `BTECHRECRUITER_PLATFORM_CODE` | BTechRecruiter platform code | `btechrecruiter` |
-| `BTECHRECRUITER_TENANT_SLUG` | BTechRecruiter test tenant | `test-company` |
+| `APP1_PLATFORM_CODE` | First test platform code | `myapp` |
+| `APP1_TENANT_SLUG` | First test tenant slug | `test-tenant` |
+| `APP2_PLATFORM_CODE` | Second test platform code | `otherapp` |
+| `APP2_TENANT_SLUG` | Second test tenant slug | `test-company` |
 
 ## Reports
 

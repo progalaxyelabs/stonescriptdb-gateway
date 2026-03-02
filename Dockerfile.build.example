@@ -1,6 +1,3 @@
-# Build Dockerfile for stonescriptdb-gateway
-# Builds on Ubuntu 22.04 to match Azure Swarm Manager (glibc 2.35)
-#
 # Usage:
 #   docker build -f Dockerfile.build -t stonescriptdb-gateway-builder .
 #   docker run --rm -v "$PWD/output:/output" stonescriptdb-gateway-builder

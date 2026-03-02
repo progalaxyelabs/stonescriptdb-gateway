@@ -120,7 +120,7 @@ test.describe('OAuth - Mock/Stub Tests', () => {
       {
         data: {
           provider: 'google',
-          platform_code: 'progalaxy',
+          platform_code: TEST_TENANTS[0].platform_code,
           redirect_uri: 'http://test.com/callback',
         },
         failOnStatusCode: false,

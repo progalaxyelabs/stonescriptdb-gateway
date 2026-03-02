@@ -149,9 +149,7 @@ CI=true npm test
 ## Prerequisites
 
 1. **Gateway Running**: Gateway must be accessible at configured URL (default: http://localhost:9000)
-2. **Test Tenants Created**:
-   - `progalaxy/test-tenant`
-   - `btechrecruiter/test-company`
+2. **Test Tenants Created** (configured via `APP1_*` and `APP2_*` in `.env`)
 3. **Node.js 18+**: For running Playwright tests
 
 ## CI/CD Integration

@@ -4,8 +4,8 @@ mod call;
 mod database;
 mod health;
 mod membership;
-mod migrate_all_v2;
-mod migrate_v2;
+mod migrate_all;
+mod migrate;
 mod platform;
 
 pub use admin::{admin_create_tenant, admin_list_databases};
@@ -18,8 +18,8 @@ pub use call::call_function;
 pub use database::{create_database, DatabaseState};
 pub use health::health_check;
 pub use membership::{accept_invite, invite_membership, list_memberships, update_membership};
-pub use migrate_all_v2::migrate_all_schema_v2;
-pub use migrate_v2::{migrate_schema_v2, MigrateV2State};
+pub use migrate_all::migrate_all_schema;
+pub use migrate::{migrate_schema, MigrateState};
 pub use platform::{
     list_databases, list_platforms, list_schemas, register_platform,
     register_schema as register_platform_schema, PlatformState,

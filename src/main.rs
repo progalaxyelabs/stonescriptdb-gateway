@@ -12,10 +12,10 @@ use crate::api::{
     accept_invite, admin_create_tenant, admin_list_databases, call_function, change_password,
     create_database, delete_oauth_connection, get_jwks, get_oauth_connections, health_check,
     invite_membership, list_databases, list_memberships, list_platforms, list_schemas, login,
-    logout, migrate_all_schema_v2, migrate_schema_v2, oauth_callback, oauth_initiate,
+    logout, migrate_all_schema, migrate_schema, oauth_callback, oauth_initiate,
     password_reset_confirm, password_reset_request, refresh, register, register_platform,
     register_platform_schema, select_tenant, switch_tenant, update_membership, DatabaseState,
-    MigrateV2State, PlatformState,
+    MigrateState, PlatformState,
 };
 use crate::auth::jwt::JwtService;
 use crate::auth::oauth::OAuthService;
@@ -115,8 +115,8 @@ async fn main() -> anyhow::Result<()> {
         platform_state: platform_state.clone(),
     });
 
-    // Create migrate v2 state
-    let migrate_v2_state = Arc::new(MigrateV2State {
+    // Create migrate state
+    let migrate_state = Arc::new(MigrateState {
         pool_manager: pool_manager.clone(),
         platform_state: platform_state.clone(),
     });
@@ -327,11 +327,11 @@ async fn main() -> anyhow::Result<()> {
         // Migrate endpoints using stored schemas
         .route(
             "/v2/migrate",
-            post(migrate_schema_v2).with_state(migrate_v2_state.clone()),
+            post(migrate_schema).with_state(migrate_state.clone()),
         )
         .route(
             "/v2/migrate-all",
-            post(migrate_all_schema_v2).with_state(migrate_v2_state),
+            post(migrate_all_schema).with_state(migrate_state),
         );
 
     // Spawn cleanup task for idle pools

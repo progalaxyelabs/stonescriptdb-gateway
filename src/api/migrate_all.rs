@@ -1,4 +1,4 @@
-//! Migrate All API v2 - Migrate all databases for a platform
+//! Migrate All API - Migrate all databases for a platform
 //!
 //! POST /v2/migrate-all - Migrate all databases for a platform using stored schema
 
@@ -6,7 +6,7 @@ use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
     ChangeCompatibility, ChangelogManager, FunctionDeployer, MigrationRunner, SchemaDiff,
-    SchemaDiffChecker, SchemaVerifier,
+    SchemaDiffChecker, SchemaVerifier, TableDeployer,
 };
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -14,11 +14,11 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{info, warn};
 
-/// Shared state for migrate-all v2 endpoint (reuses MigrateV2State)
-pub use crate::api::migrate_v2::MigrateV2State;
+/// Shared state for migrate-all endpoint (reuses MigrateState)
+pub use crate::api::migrate::MigrateState;
 
 #[derive(Debug, Deserialize)]
-pub struct MigrateAllV2Request {
+pub struct MigrateAllRequest {
     pub platform: String,
     pub schema_name: String,
     #[serde(default)]
@@ -30,6 +30,7 @@ pub struct DatabaseMigrationResult {
     database: String,
     status: String,
     migrations_applied: usize,
+    tables_created: usize,
     functions_updated: usize,
     error: Option<String>,
 }
@@ -53,7 +54,7 @@ pub struct SchemaValidationInfo {
 }
 
 #[derive(Serialize)]
-pub struct MigrateAllV2Response {
+pub struct MigrateAllResponse {
     status: String,
     platform: String,
     schema_name: String,
@@ -65,9 +66,9 @@ pub struct MigrateAllV2Response {
     execution_time_ms: u64,
 }
 
-pub async fn migrate_all_schema_v2(
-    State(state): State<Arc<MigrateV2State>>,
-    Json(request): Json<MigrateAllV2Request>,
+pub async fn migrate_all_schema(
+    State(state): State<Arc<MigrateState>>,
+    Json(request): Json<MigrateAllRequest>,
 ) -> Result<impl IntoResponse> {
     let start_time = Instant::now();
 
@@ -106,10 +107,21 @@ pub async fn migrate_all_schema_v2(
         .await?;
 
     if databases.is_empty() {
+        // List available schemas so the developer can see what's registered
+        let available_schemas = state
+            .platform_state
+            .schema_store
+            .list_schemas(&request.platform)
+            .unwrap_or_default();
+
         return Err(GatewayError::InvalidRequest {
             message: format!(
-                "No databases found for platform '{}'.",
-                request.platform
+                "No databases found for platform '{}'. \
+                 This platform has {} registered schema(s): {:?}. \
+                 Databases are created via POST /v2/database — did you create one first?",
+                request.platform,
+                available_schemas.len(),
+                available_schemas,
             ),
         });
     }
@@ -149,6 +161,7 @@ pub async fn migrate_all_schema_v2(
 
     let changelog_manager = ChangelogManager::new();
     let migration_runner = MigrationRunner::new();
+    let table_deployer = TableDeployer::new();
     let function_deployer = FunctionDeployer::new();
     let schema_verifier = SchemaVerifier::new();
     let diff_checker = SchemaDiffChecker::new();
@@ -177,6 +190,7 @@ pub async fn migrate_all_schema_v2(
             &seeders_dir,
             &changelog_manager,
             &migration_runner,
+            &table_deployer,
             &function_deployer,
             &schema_verifier,
             &diff_checker,
@@ -185,7 +199,7 @@ pub async fn migrate_all_schema_v2(
         )
         .await
         {
-            Ok((migrations, functions, diff)) => {
+            Ok((migrations, tables, functions, diff)) => {
                 if i == 0 {
                     if let Some(d) = diff {
                         schema_validation = Some(diff_to_validation_info(&d));
@@ -195,6 +209,7 @@ pub async fn migrate_all_schema_v2(
                     database: db_name.clone(),
                     status: "completed".to_string(),
                     migrations_applied: migrations,
+                    tables_created: tables,
                     functions_updated: functions,
                     error: None,
                 });
@@ -206,6 +221,7 @@ pub async fn migrate_all_schema_v2(
                     database: db_name.clone(),
                     status: "failed".to_string(),
                     migrations_applied: 0,
+                    tables_created: 0,
                     functions_updated: 0,
                     error: Some(e.to_string()),
                 });
@@ -219,6 +235,7 @@ pub async fn migrate_all_schema_v2(
                             database: remaining_db.clone(),
                             status: "skipped".to_string(),
                             migrations_applied: 0,
+                            tables_created: 0,
                             functions_updated: 0,
                             error: Some("Skipped due to first database failure".to_string()),
                         });
@@ -247,7 +264,7 @@ pub async fn migrate_all_schema_v2(
 
     Ok((
         StatusCode::OK,
-        Json(MigrateAllV2Response {
+        Json(MigrateAllResponse {
             status,
             platform: request.platform,
             schema_name: request.schema_name,
@@ -273,12 +290,13 @@ async fn migrate_single_database(
     seeders_dir: &std::path::Path,
     changelog_manager: &ChangelogManager,
     migration_runner: &MigrationRunner,
+    table_deployer: &TableDeployer,
     function_deployer: &FunctionDeployer,
     schema_verifier: &SchemaVerifier,
     diff_checker: &SchemaDiffChecker,
     force: bool,
     validate_schema: bool,
-) -> std::result::Result<(usize, usize, Option<SchemaDiff>), GatewayError> {
+) -> std::result::Result<(usize, usize, usize, Option<SchemaDiff>), GatewayError> {
     let pool = pool_manager.get_pool_by_name(db_name).await?;
 
     // Ensure changelog table exists
@@ -301,12 +319,17 @@ async fn migrate_single_database(
         .run_migrations(&pool, db_name, migrations_dir)
         .await?;
 
-    // 2. Deploy functions
+    // 2. Deploy tables (CREATE IF NOT EXISTS for new .pgsql files)
+    let tables = table_deployer
+        .deploy_tables(&pool, db_name, tables_dir)
+        .await?;
+
+    // 3. Deploy functions
     let functions = function_deployer
         .deploy_functions(&pool, db_name, functions_dir)
         .await?;
 
-    // 3. Verify schema (only on first database)
+    // 4. Verify schema (only on first database)
     if validate_schema {
         let verification = schema_verifier
             .verify_schema(
@@ -354,7 +377,7 @@ async fn migrate_single_database(
             .ok();
     }
 
-    Ok((migrations, functions, diff))
+    Ok((migrations, tables, functions, diff))
 }
 
 /// Convert SchemaDiff to SchemaValidationInfo for JSON response

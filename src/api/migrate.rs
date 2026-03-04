@@ -1,4 +1,4 @@
-//! Migrate API v2 - Uses stored schemas
+//! Migrate API - Uses stored schemas
 //!
 //! POST /v2/migrate - Migrate databases using stored schema
 
@@ -7,7 +7,7 @@ use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
     ChangeCompatibility, ChangelogManager, FunctionDeployer, MigrationRunner, SchemaDiff,
-    SchemaDiffChecker, SchemaVerifier,
+    SchemaDiffChecker, SchemaVerifier, TableDeployer,
 };
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -15,14 +15,14 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
 
-/// Shared state for migrate v2 endpoint
-pub struct MigrateV2State {
+/// Shared state for migrate endpoint
+pub struct MigrateState {
     pub pool_manager: Arc<PoolManager>,
     pub platform_state: Arc<PlatformState>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MigrateV2Request {
+pub struct MigrateRequest {
     pub platform: String,
     pub schema_name: String,
     /// Required: specific database/tenant to migrate (e.g., "main" for main DB, or tenant ID for tenant DB)
@@ -67,12 +67,13 @@ pub struct VerificationInfo {
 }
 
 #[derive(Serialize)]
-pub struct MigrateV2Response {
+pub struct MigrateResponse {
     status: String,
     platform: String,
     schema_name: String,
     databases_updated: Vec<String>,
     migrations_applied: usize,
+    tables_created: usize,
     functions_updated: usize,
     seeder_validations: Vec<SeederValidationInfo>,
     schema_validation: Option<SchemaValidationInfo>,
@@ -80,9 +81,9 @@ pub struct MigrateV2Response {
     execution_time_ms: u64,
 }
 
-pub async fn migrate_schema_v2(
-    State(state): State<Arc<MigrateV2State>>,
-    Json(request): Json<MigrateV2Request>,
+pub async fn migrate_schema(
+    State(state): State<Arc<MigrateState>>,
+    Json(request): Json<MigrateRequest>,
 ) -> Result<impl IntoResponse> {
     let start_time = Instant::now();
 
@@ -138,12 +139,14 @@ pub async fn migrate_schema_v2(
 
     let changelog_manager = ChangelogManager::new();
     let migration_runner = MigrationRunner::new();
+    let table_deployer = TableDeployer::new();
     let function_deployer = FunctionDeployer::new();
     let schema_verifier = SchemaVerifier::new();
     let diff_checker = SchemaDiffChecker::new();
 
     let mut databases_updated = Vec::new();
     let mut total_migrations = 0;
+    let mut total_tables = 0;
     let mut total_functions = 0;
     let mut all_seeder_validations = Vec::new();
     let mut schema_validation: Option<SchemaValidationInfo> = None;
@@ -197,12 +200,17 @@ pub async fn migrate_schema_v2(
             .run_migrations(&pool, db_name, &migrations_dir)
             .await?;
 
-        // 2. Deploy functions (always redeployed)
+        // 2. Deploy tables (CREATE IF NOT EXISTS for new .pgsql files)
+        let tables = table_deployer
+            .deploy_tables(&pool, db_name, &tables_dir)
+            .await?;
+
+        // 3. Deploy functions (always redeployed)
         let functions = function_deployer
             .deploy_functions(&pool, db_name, &functions_dir)
             .await?;
 
-        // 3. Verify schema matches declarative definitions (only on first database)
+        // 4. Verify schema matches declarative definitions (only on first database)
         if i == 0 {
             let verification = schema_verifier
                 .verify_schema(
@@ -276,6 +284,7 @@ pub async fn migrate_schema_v2(
         }
 
         total_migrations += migrations;
+        total_tables += tables;
         total_functions += functions;
         databases_updated.push(db_name.clone());
     }
@@ -289,23 +298,25 @@ pub async fn migrate_schema_v2(
     };
 
     info!(
-        "Migration complete for platform '{}' schema '{}': {} databases, {} migrations, {} functions in {}ms",
+        "Migration complete for platform '{}' schema '{}': {} databases, {} migrations, {} tables, {} functions in {}ms",
         request.platform,
         request.schema_name,
         databases_updated.len(),
         total_migrations,
+        total_tables,
         total_functions,
         execution_time_ms
     );
 
     Ok((
         StatusCode::OK,
-        Json(MigrateV2Response {
+        Json(MigrateResponse {
             status,
             platform: request.platform,
             schema_name: request.schema_name,
             databases_updated,
             migrations_applied: total_migrations,
+            tables_created: total_tables,
             functions_updated: total_functions,
             seeder_validations: all_seeder_validations,
             schema_validation,

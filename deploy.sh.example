@@ -90,7 +90,7 @@ else
     ssh "$SSH_HOST" << 'ENDSSH'
 set -e
 echo "Replacing binary (systemd will auto-restart)..."
-kill $(pgrep stonescriptdb-gateway) 2>/dev/null || true
+kill $(pgrep -f stonescriptdb-gateway) 2>/dev/null || true
 mv /tmp/stonescriptdb-gateway /opt/stonescriptdb-gateway/stonescriptdb-gateway
 chmod +x /opt/stonescriptdb-gateway/stonescriptdb-gateway
 sleep 6

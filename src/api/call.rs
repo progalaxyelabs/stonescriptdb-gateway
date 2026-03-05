@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 // Cache for function param types to avoid per-call DB lookups.
 // Key: "{db_name}:{function_name}", Value: (param_types, cached_at)
@@ -105,21 +105,38 @@ pub async fn call_function(
                 Some(types)
             } else {
                 // Query the gateway functions registry.
-                // Errors are swallowed — fall back to naive type inference.
-                client
+                match client
                     .query_opt(
                         "SELECT param_types FROM _stonescriptdb_gateway_functions \
                          WHERE function_name = $1 LIMIT 1",
                         &[&request.function],
                     )
                     .await
-                    .ok()
-                    .flatten()
-                    .map(|row| {
+                {
+                    Ok(Some(row)) => {
                         let types: Vec<String> = row.get(0);
                         PARAM_TYPE_CACHE.insert(cache_key, (types.clone(), Instant::now()));
-                        types
-                    })
+                        Some(types)
+                    }
+                    Ok(None) => {
+                        warn!(
+                            "No type registry entry for function '{}' in database '{}'. \
+                             Parameters will use naive type inference. \
+                             Run migrate to update the function registry.",
+                            request.function, db_name
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Type lookup failed for function '{}' in database '{}': {}. \
+                             Parameters will use naive type inference. \
+                             Run migrate to update the function registry.",
+                            request.function, db_name, e
+                        );
+                        None
+                    }
+                }
             }
         };
 

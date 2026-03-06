@@ -6,8 +6,8 @@ use crate::api::platform::PlatformState;
 use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
-    ChangeCompatibility, ChangelogManager, FunctionDeployer, MigrationRunner, SchemaDiff,
-    SchemaDiffChecker, SchemaVerifier, TableDeployer,
+    ChangeCompatibility, ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer,
+    MigrationRunner, SchemaDiff, SchemaDiffChecker, SchemaVerifier, TableDeployer,
 };
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -138,6 +138,8 @@ pub async fn migrate_schema(
         .seeders_dir(&request.platform, &request.schema_name);
 
     let changelog_manager = ChangelogManager::new();
+    let extension_manager = ExtensionManager::new();
+    let type_manager = CustomTypeManager::new();
     let migration_runner = MigrationRunner::new();
     let table_deployer = TableDeployer::new();
     let function_deployer = FunctionDeployer::new();
@@ -195,19 +197,29 @@ pub async fn migrate_schema(
             schema_validation = Some(diff_to_validation_info(&diff));
         }
 
-        // 1. Run migrations ONLY from migrations/ folder
-        let migrations = migration_runner
-            .run_migrations(&pool, db_name, &migrations_dir)
+        // 1. Install extensions (idempotent)
+        extension_manager
+            .install_extensions(&pool, db_name, &extensions_dir)
             .await?;
 
-        // 2. Deploy tables (CREATE IF NOT EXISTS for new .pgsql files)
+        // 2. Deploy custom types (enums etc. — must exist before tables reference them)
+        type_manager
+            .deploy_types(&pool, db_name, &types_dir)
+            .await?;
+
+        // 3. Deploy tables (CREATE IF NOT EXISTS for new .pgsql files)
         let tables = table_deployer
             .deploy_tables(&pool, db_name, &tables_dir)
             .await?;
 
-        // 3. Deploy functions (always redeployed)
+        // 4. Deploy functions (always redeployed)
         let functions = function_deployer
             .deploy_functions(&pool, db_name, &functions_dir)
+            .await?;
+
+        // 5. Run migrations (ALTER TABLE, etc. — after base schema is fully deployed)
+        let migrations = migration_runner
+            .run_migrations(&pool, db_name, &migrations_dir)
             .await?;
 
         // 4. Verify schema matches declarative definitions (only on first database)

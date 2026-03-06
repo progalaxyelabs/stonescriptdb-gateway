@@ -238,7 +238,9 @@ impl TypeChecker {
             .replace("FLOAT4", "REAL")
             .replace("FLOAT8", "DOUBLE PRECISION")
             .replace("TIMESTAMP WITHOUT TIME ZONE", "TIMESTAMP")
-            .replace("TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ");
+            .replace("TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ")
+            .replace("TIME WITHOUT TIME ZONE", "TIME")
+            .replace("TIME WITH TIME ZONE", "TIMETZ");
 
         // Handle aliases that are substrings (must check whole word to avoid false replacements)
         // e.g., "BOOL" is substring of "BOOLEAN", "INT" is substring of "INTEGER"

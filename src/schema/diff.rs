@@ -267,13 +267,17 @@ impl SchemaDiffChecker {
 
             let is_nullable = is_nullable_str.to_uppercase() == "YES";
 
-            // Convert ARRAY types to proper notation (e.g., ARRAY with udt_name _text -> TEXT[])
+            // Normalize data_type from information_schema:
+            // - ARRAY with udt_name _text -> TEXT[]
+            // - USER-DEFINED (enums, composites) -> use udt_name (e.g., stock_transaction_source)
             let normalized_data_type = if data_type.to_uppercase() == "ARRAY" {
                 if let Some(element_type) = udt_name.strip_prefix('_') {
                     format!("{}[]", element_type.to_uppercase())
                 } else {
                     data_type.to_uppercase()
                 }
+            } else if data_type.to_uppercase() == "USER-DEFINED" {
+                udt_name.to_uppercase()
             } else {
                 data_type.to_uppercase()
             };

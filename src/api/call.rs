@@ -285,45 +285,59 @@ fn row_to_json_value(row: &tokio_postgres::Row, idx: usize) -> Value {
     let column = &row.columns()[idx];
     let col_type = column.type_();
 
-    // Handle NULL values
-    if let Ok(opt) = row.try_get::<_, Option<String>>(idx) {
-        if opt.is_none() {
-            return Value::Null;
-        }
-    }
-
     // Try to get the appropriate type based on column type
+    // Each branch uses Option<T> to handle NULLs natively
     match *col_type {
         Type::BOOL => row
-            .try_get::<_, bool>(idx)
+            .try_get::<_, Option<bool>>(idx)
+            .ok()
+            .flatten()
             .map(Value::Bool)
             .unwrap_or(Value::Null),
 
         Type::INT2 => row
-            .try_get::<_, i16>(idx)
+            .try_get::<_, Option<i16>>(idx)
+            .ok()
+            .flatten()
             .map(|v| Value::Number(v.into()))
             .unwrap_or(Value::Null),
 
         Type::INT4 => row
-            .try_get::<_, i32>(idx)
+            .try_get::<_, Option<i32>>(idx)
+            .ok()
+            .flatten()
             .map(|v| Value::Number(v.into()))
             .unwrap_or(Value::Null),
 
         Type::INT8 => row
-            .try_get::<_, i64>(idx)
+            .try_get::<_, Option<i64>>(idx)
+            .ok()
+            .flatten()
             .map(|v| Value::Number(v.into()))
             .unwrap_or(Value::Null),
 
         Type::FLOAT4 => row
-            .try_get::<_, f32>(idx)
+            .try_get::<_, Option<f32>>(idx)
             .ok()
+            .flatten()
             .and_then(|v| serde_json::Number::from_f64(v as f64).map(Value::Number))
             .unwrap_or(Value::Null),
 
         Type::FLOAT8 => row
-            .try_get::<_, f64>(idx)
+            .try_get::<_, Option<f64>>(idx)
             .ok()
+            .flatten()
             .and_then(|v| serde_json::Number::from_f64(v).map(Value::Number))
+            .unwrap_or(Value::Null),
+
+        Type::NUMERIC => row
+            .try_get::<_, Option<rust_decimal::Decimal>>(idx)
+            .ok()
+            .flatten()
+            .and_then(|v| {
+                use rust_decimal::prelude::ToPrimitive;
+                v.to_f64().and_then(|f| serde_json::Number::from_f64(f).map(Value::Number))
+            })
             .unwrap_or(Value::Null),
 
         Type::JSON | Type::JSONB => row

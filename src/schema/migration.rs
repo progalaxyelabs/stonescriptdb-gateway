@@ -206,7 +206,7 @@ impl MigrationRunner {
             let path = entry.path();
             if path.is_file() {
                 if let Some(ext) = path.extension() {
-                    if ext == "pssql" {
+                    if ext == "pssql" || ext == "pgsql" || ext == "sql" {
                         let name = path
                             .file_name()
                             .and_then(|n| n.to_str())
@@ -564,6 +564,8 @@ fn compute_checksum(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_compute_checksum() {
@@ -578,5 +580,26 @@ mod tests {
         // Different content should produce different checksum
         let checksum3 = compute_checksum("CREATE TABLE other (id INT);");
         assert_ne!(checksum, checksum3);
+    }
+
+    #[test]
+    fn test_find_migration_files_all_extensions() {
+        let temp_dir = TempDir::new().unwrap();
+        let migrations_dir = temp_dir.path();
+
+        // Create migration files with all supported extensions
+        fs::write(migrations_dir.join("001_init.pssql"), "ALTER TABLE t ADD COLUMN a INT;").unwrap();
+        fs::write(migrations_dir.join("002_add_col.pgsql"), "ALTER TABLE t ADD COLUMN b INT;").unwrap();
+        fs::write(migrations_dir.join("003_seed.sql"), "INSERT INTO t VALUES (1);").unwrap();
+        fs::write(migrations_dir.join("004_ignored.txt"), "not a migration").unwrap();
+
+        let runner = MigrationRunner::new();
+        let files = runner.find_migration_files(migrations_dir).unwrap();
+
+        // Only SQL-extension files should be found, sorted alphabetically
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].name, "001_init.pssql");
+        assert_eq!(files[1].name, "002_add_col.pgsql");
+        assert_eq!(files[2].name, "003_seed.sql");
     }
 }

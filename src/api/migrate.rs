@@ -154,12 +154,11 @@ pub async fn migrate_schema(
     let mut schema_validation: Option<SchemaValidationInfo> = None;
     let mut verification_info: Option<VerificationInfo> = None;
 
-    // Construct database name from platform, schema, and database_id
-    // database_id can be "main" or a tenant identifier
+    // Construct database name using the same sanitization as database creation
     let db_name = if request.database_id == "main" {
-        format!("{}_main", request.platform)
+        state.pool_manager.database_name(&request.platform, None)
     } else {
-        format!("{}_{}", request.platform, request.database_id)
+        state.pool_manager.database_name(&request.platform, Some(&request.database_id))
     };
 
     // Verify database exists

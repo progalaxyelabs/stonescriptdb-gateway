@@ -7,8 +7,13 @@ Cargo.lock
 Dockerfile.build
 Dockerfile.local
 
-# Infrastructure-specific deployment scripts (copy from *.example and configure locally)
+# Infrastructure-specific scripts (private, not for public repo)
 deploy.sh
+deploy.sh.example
+build.sh
+Dockerfile.build.example
+deploy/
+tests/e2e-return-type-change/deploy-test-gateway.sh
 
 # Environment
 .env

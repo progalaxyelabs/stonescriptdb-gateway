@@ -6,11 +6,10 @@
 # Copy to deploy.sh and configure SSH hosts for your environment.
 #
 # Usage:
-#   ./deploy.sh [TARGET]
+#   ./deploy.sh dev   Deploy to development server
+#   ./deploy.sh prod  Deploy to production server
 #
-# Targets:
-#   dev   - Deploy to development server (default)
-#   prod  - Deploy to production server
+# Target is mandatory. Configure DEV_SSH_HOST and PROD_SSH_HOST below.
 # =============================================================================
 
 set -e
@@ -33,7 +32,17 @@ DEV_USE_SUDO=false
 PROD_USE_SUDO=true
 # =============================================================================
 
-TARGET_ARG=${1:-dev}
+TARGET_ARG=${1:-}
+
+# Target is mandatory
+if [ -z "$TARGET_ARG" ]; then
+    echo -e "${RED}Error: target is required.${NC}"
+    echo ""
+    echo "Usage:"
+    echo "  ./deploy.sh dev   Deploy to development server"
+    echo "  ./deploy.sh prod  Deploy to production server"
+    exit 1
+fi
 
 # Binary source: prefer Docker-built output/ (GLIBC-compatible), fallback to cargo target/
 if [ -f "output/stonescriptdb-gateway" ]; then
@@ -57,8 +66,12 @@ case "$TARGET_ARG" in
         USE_SUDO=$DEV_USE_SUDO
         ;;
     *)
-        SSH_HOST="$TARGET_ARG"
-        USE_SUDO=true
+        echo -e "${RED}Error: unknown target '${TARGET_ARG}'.${NC}"
+        echo ""
+        echo "Usage:"
+        echo "  ./deploy.sh dev   Deploy to development server"
+        echo "  ./deploy.sh prod  Deploy to production server"
+        exit 1
         ;;
 esac
 

@@ -10,7 +10,9 @@
 //! 4. Block migration if DATALOSS detected (unless force=true)
 
 use crate::error::{GatewayError, Result};
+use crate::schema::column_type_exemptions::{self, ColumnTypeExemption};
 use crate::schema::dependency::DependencyAnalyzer;
+use crate::schema::migration::MigrationRunner;
 use crate::schema::types::{TypeChecker, TypeCompatibility};
 use deadpool_postgres::Pool;
 use serde::Serialize;
@@ -305,11 +307,25 @@ impl SchemaDiffChecker {
         Ok(tables)
     }
 
-    /// Compare desired schema against current schema
+    /// Compare desired schema against current schema (no exemptions)
     pub fn diff_schemas(
         &self,
         desired: &HashMap<String, TableSchema>,
         current: &HashMap<String, TableSchema>,
+    ) -> SchemaDiff {
+        self.diff_schemas_with_exemptions(desired, current, &[])
+    }
+
+    /// Compare desired schema against current schema, with column type exemptions.
+    ///
+    /// Exemptions are columns whose type changes are handled by
+    /// `_stonescriptdb_gateway_change_column_type` in pending migrations.
+    /// These specific columns are marked as Safe instead of DataLoss/Incompatible.
+    pub fn diff_schemas_with_exemptions(
+        &self,
+        desired: &HashMap<String, TableSchema>,
+        current: &HashMap<String, TableSchema>,
+        exemptions: &[ColumnTypeExemption],
     ) -> SchemaDiff {
         let mut diff = SchemaDiff::new();
 
@@ -330,7 +346,7 @@ impl SchemaDiffChecker {
                 }
                 Some(current_table) => {
                     // Compare columns
-                    self.diff_table_columns(&mut diff, table_name, desired_table, current_table);
+                    self.diff_table_columns(&mut diff, table_name, desired_table, current_table, exemptions);
                 }
             }
         }
@@ -360,42 +376,64 @@ impl SchemaDiffChecker {
         table_name: &str,
         desired: &TableSchema,
         current: &TableSchema,
+        exemptions: &[ColumnTypeExemption],
     ) {
         // Check for new and modified columns
         for (col_name, desired_col) in &desired.columns {
             match current.columns.get(col_name) {
                 None => {
-                    // New column
-                    let compatibility = if !desired_col.is_nullable
-                        && desired_col.column_default.is_none()
-                    {
-                        // NOT NULL without DEFAULT on existing table with data - needs special handling
-                        ChangeCompatibility::DataLoss
-                    } else {
-                        ChangeCompatibility::Safe
-                    };
+                    // New column — but check if an exemption covers this column.
+                    // When _stonescriptdb_gateway_change_column_type runs, the old column
+                    // gets dropped and the new one renamed. The diff sees the desired column
+                    // as "new" because the old column has a different type. If an exemption
+                    // exists for this (table, column), the migration will handle it.
+                    let is_exempted = exemptions.iter().any(|e| e.table == table_name && e.column.as_str() == col_name);
 
-                    diff.add_change(SchemaChange {
-                        table: table_name.to_string(),
-                        change_type: ChangeType::AddColumn,
-                        column: Some(col_name.clone()),
-                        from_type: None,
-                        to_type: Some(desired_col.full_type()),
-                        compatibility,
-                        reason: if !desired_col.is_nullable && desired_col.column_default.is_none()
-                        {
-                            Some(
-                                "Adding NOT NULL column without DEFAULT requires data migration"
+                    if is_exempted {
+                        diff.add_change(SchemaChange {
+                            table: table_name.to_string(),
+                            change_type: ChangeType::AddColumn,
+                            column: Some(col_name.clone()),
+                            from_type: None,
+                            to_type: Some(desired_col.full_type()),
+                            compatibility: ChangeCompatibility::Safe,
+                            reason: Some(
+                                "Column type change handled by _stonescriptdb_gateway_change_column_type in pending migration"
                                     .to_string(),
-                            )
+                            ),
+                        });
+                    } else {
+                        let compatibility = if !desired_col.is_nullable
+                            && desired_col.column_default.is_none()
+                        {
+                            // NOT NULL without DEFAULT on existing table with data - needs special handling
+                            ChangeCompatibility::DataLoss
                         } else {
-                            None
-                        },
-                    });
+                            ChangeCompatibility::Safe
+                        };
+
+                        diff.add_change(SchemaChange {
+                            table: table_name.to_string(),
+                            change_type: ChangeType::AddColumn,
+                            column: Some(col_name.clone()),
+                            from_type: None,
+                            to_type: Some(desired_col.full_type()),
+                            compatibility,
+                            reason: if !desired_col.is_nullable && desired_col.column_default.is_none()
+                            {
+                                Some(
+                                    "Adding NOT NULL column without DEFAULT requires data migration"
+                                        .to_string(),
+                                )
+                            } else {
+                                None
+                            },
+                        });
+                    }
                 }
                 Some(current_col) => {
                     // Check type change
-                    self.diff_column_type(diff, table_name, col_name, desired_col, current_col);
+                    self.diff_column_type(diff, table_name, col_name, desired_col, current_col, exemptions);
 
                     // Check nullable change
                     if desired_col.is_nullable != current_col.is_nullable {
@@ -435,18 +473,38 @@ impl SchemaDiffChecker {
             }
         }
 
-        // Check for dropped columns
+        // Check for dropped columns — but exclude columns that have an exemption.
+        // When _stonescriptdb_gateway_change_column_type runs, the old column gets dropped
+        // and replaced. The diff would see the old column as "dropped" if its type doesn't
+        // match what's in the desired schema. If an exemption covers this column, skip it.
         for col_name in current.columns.keys() {
             if !desired.columns.contains_key(col_name) {
-                diff.add_change(SchemaChange {
-                    table: table_name.to_string(),
-                    change_type: ChangeType::DropColumn,
-                    column: Some(col_name.clone()),
-                    from_type: Some(current.columns[col_name].full_type()),
-                    to_type: None,
-                    compatibility: ChangeCompatibility::DataLoss,
-                    reason: Some("Dropping column will delete all data in that column".to_string()),
-                });
+                let is_exempted = exemptions.iter().any(|e| e.table == table_name && e.column.as_str() == col_name);
+
+                if is_exempted {
+                    diff.add_change(SchemaChange {
+                        table: table_name.to_string(),
+                        change_type: ChangeType::DropColumn,
+                        column: Some(col_name.clone()),
+                        from_type: Some(current.columns[col_name].full_type()),
+                        to_type: None,
+                        compatibility: ChangeCompatibility::Safe,
+                        reason: Some(
+                            "Column drop handled by _stonescriptdb_gateway_change_column_type in pending migration"
+                                .to_string(),
+                        ),
+                    });
+                } else {
+                    diff.add_change(SchemaChange {
+                        table: table_name.to_string(),
+                        change_type: ChangeType::DropColumn,
+                        column: Some(col_name.clone()),
+                        from_type: Some(current.columns[col_name].full_type()),
+                        to_type: None,
+                        compatibility: ChangeCompatibility::DataLoss,
+                        reason: Some("Dropping column will delete all data in that column".to_string()),
+                    });
+                }
             }
         }
     }
@@ -459,6 +517,7 @@ impl SchemaDiffChecker {
         col_name: &str,
         desired: &ColumnSchema,
         current: &ColumnSchema,
+        exemptions: &[ColumnTypeExemption],
     ) {
         let desired_type = desired.full_type();
         let current_type = current.full_type();
@@ -481,27 +540,45 @@ impl SchemaDiffChecker {
                     reason: None,
                 });
             }
-            TypeCompatibility::DataLoss { reason } => {
-                diff.add_change(SchemaChange {
-                    table: table_name.to_string(),
-                    change_type: ChangeType::ModifyColumnType,
-                    column: Some(col_name.to_string()),
-                    from_type: Some(current_type),
-                    to_type: Some(desired_type),
-                    compatibility: ChangeCompatibility::DataLoss,
-                    reason: Some(reason),
+            TypeCompatibility::DataLoss { ref reason } | TypeCompatibility::Incompatible { ref reason } => {
+                // Check if this column type change is exempted by a pending migration
+                let is_exempted = exemptions.iter().any(|e| {
+                    e.table == table_name && e.column.as_str() == col_name
                 });
-            }
-            TypeCompatibility::Incompatible { reason } => {
-                diff.add_change(SchemaChange {
-                    table: table_name.to_string(),
-                    change_type: ChangeType::ModifyColumnType,
-                    column: Some(col_name.to_string()),
-                    from_type: Some(current_type),
-                    to_type: Some(desired_type),
-                    compatibility: ChangeCompatibility::Incompatible,
-                    reason: Some(reason),
-                });
+
+                if is_exempted {
+                    info!(
+                        "Column type change {}.{} ({} -> {}) exempted by _stonescriptdb_gateway_change_column_type",
+                        table_name, col_name, current_type, desired_type
+                    );
+                    diff.add_change(SchemaChange {
+                        table: table_name.to_string(),
+                        change_type: ChangeType::ModifyColumnType,
+                        column: Some(col_name.to_string()),
+                        from_type: Some(current_type),
+                        to_type: Some(desired_type),
+                        compatibility: ChangeCompatibility::Safe,
+                        reason: Some(format!(
+                            "Column type change handled by _stonescriptdb_gateway_change_column_type in pending migration (original: {})",
+                            reason
+                        )),
+                    });
+                } else {
+                    let compatibility = if matches!(compat, TypeCompatibility::Incompatible { .. }) {
+                        ChangeCompatibility::Incompatible
+                    } else {
+                        ChangeCompatibility::DataLoss
+                    };
+                    diff.add_change(SchemaChange {
+                        table: table_name.to_string(),
+                        change_type: ChangeType::ModifyColumnType,
+                        column: Some(col_name.to_string()),
+                        from_type: Some(current_type),
+                        to_type: Some(desired_type),
+                        compatibility,
+                        reason: Some(reason.clone()),
+                    });
+                }
             }
         }
     }
@@ -513,6 +590,7 @@ impl SchemaDiffChecker {
         pool: &Pool,
         database: &str,
         tables_dir: &Path,
+        migrations_dir: &Path,
         force: bool,
     ) -> Result<SchemaDiff> {
         // Parse desired schema
@@ -526,8 +604,28 @@ impl SchemaDiffChecker {
         // Query current schema
         let current = self.query_current_schema(pool, database).await?;
 
-        // Compute diff
-        let diff = self.diff_schemas(&desired, &current);
+        // Scan pending migrations for column type exemptions
+        let migration_runner = MigrationRunner::new();
+        migration_runner.ensure_migrations_table(pool, database).await?;
+        let applied = migration_runner.get_applied_migrations(pool, database).await?;
+        let exemptions = column_type_exemptions::scan_migrations_for_exemptions(migrations_dir, &applied)?;
+
+        if !exemptions.is_empty() {
+            info!(
+                "Found {} column type exemption(s) from pending migrations for {}",
+                exemptions.len(),
+                database
+            );
+            for ex in &exemptions {
+                info!(
+                    "  - {}.{} -> {} (migration: {})",
+                    ex.table, ex.column, ex.new_type, ex.migration_file
+                );
+            }
+        }
+
+        // Compute diff with exemptions
+        let diff = self.diff_schemas_with_exemptions(&desired, &current, &exemptions);
 
         // Log changes
         if !diff.safe_changes.is_empty() {

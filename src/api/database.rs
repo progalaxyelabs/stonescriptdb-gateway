@@ -6,8 +6,8 @@ use crate::api::platform::PlatformState;
 use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
-    ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer, SeederRunner,
-    TableDeployer,
+    ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer,
+    GatewayFunctionInstaller, SeederRunner, TableDeployer,
 };
 use axum::{
     extract::State,
@@ -116,6 +116,9 @@ pub async fn create_database(
         changelog_manager
             .ensure_changelog_table(&pool, &db_name)
             .await?;
+
+        // Install gateway-provided functions
+        GatewayFunctionInstaller::ensure_installed(&pool, &db_name).await?;
 
         // Install extensions
         let extension_manager = ExtensionManager::new();

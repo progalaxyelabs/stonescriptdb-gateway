@@ -1,11 +1,13 @@
 mod audit;
 mod changelog;
+mod column_type_exemptions;
 mod custom_types;
 mod dependency;
 mod diff;
 mod extensions;
 mod extractor;
 mod functions;
+mod gateway_functions;
 mod migration;
 mod seeder;
 mod tables;
@@ -14,12 +16,14 @@ mod verifier;
 
 pub use audit::AuditLogger;
 pub use changelog::{ChangelogManager, ChangelogEntry, ChangelogRecord, ChangeType as ChangelogChangeType};
+pub use column_type_exemptions::{ColumnTypeExemption, scan_migrations_for_exemptions};
 pub use custom_types::CustomTypeManager;
 pub use dependency::{DependencyAnalyzer, DependencyAnalysis, TableInfo, ForeignKeyDependency};
 pub use diff::{SchemaDiffChecker, SchemaDiff, SchemaChange, ChangeType, ChangeCompatibility, ColumnSchema, TableSchema};
 pub use extensions::ExtensionManager;
 pub use extractor::SchemaExtractor;
 pub use functions::FunctionDeployer;
+pub use gateway_functions::GatewayFunctionInstaller;
 pub use migration::MigrationRunner;
 pub use seeder::{SeederRunner, SeederResult, SeederValidation};
 pub use tables::{TableDeployer, TableDefinition, TableDeployResult};

@@ -6,7 +6,8 @@ use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
     ChangeCompatibility, ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer,
-    MigrationRunner, SchemaDiff, SchemaDiffChecker, SchemaVerifier, TableDeployer,
+    GatewayFunctionInstaller, MigrationRunner, SchemaDiff, SchemaDiffChecker, SchemaVerifier,
+    TableDeployer,
 };
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -310,10 +311,13 @@ async fn migrate_single_database(
         .ensure_changelog_table(&pool, db_name)
         .await?;
 
+    // Install gateway-provided functions (idempotent)
+    GatewayFunctionInstaller::ensure_installed(&pool, db_name).await?;
+
     // Validate schema changes (only on first database)
     let diff = if validate_schema {
         let d = diff_checker
-            .validate_migration(&pool, db_name, tables_dir, force)
+            .validate_migration(&pool, db_name, tables_dir, migrations_dir, force)
             .await?;
         Some(d)
     } else {

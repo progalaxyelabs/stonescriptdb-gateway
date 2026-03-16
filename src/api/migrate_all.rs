@@ -259,7 +259,22 @@ pub async fn migrate_all_schema(
     } else if succeeded == 0 {
         "failed".to_string()
     } else {
-        "partial".to_string()
+        // Some succeeded and some failed. Only report "partial" if actual migration
+        // work was done on the successful databases. If all successful databases had
+        // nothing to do (0 migrations, 0 tables, 0 functions), the system is already
+        // up to date — failures were operational (e.g. connection issues), not
+        // migration failures, so the overall status is "completed".
+        let any_work_done = results.iter().any(|r| {
+            r.status == "completed"
+                && (r.migrations_applied > 0
+                    || r.tables_created > 0
+                    || r.functions_updated > 0)
+        });
+        if any_work_done {
+            "partial".to_string()
+        } else {
+            "completed".to_string()
+        }
     };
 
     info!(

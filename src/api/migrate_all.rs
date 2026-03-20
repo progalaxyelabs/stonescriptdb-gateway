@@ -101,11 +101,16 @@ pub async fn migrate_all_schema(
         });
     }
 
-    // List all databases for platform
-    let databases = state
+    // List all databases for platform, excluding the main database.
+    // The main DB ({platform}_main) stores platform-level data and should NOT
+    // have tenant schema applied to it.
+    let databases: Vec<String> = state
         .pool_manager
         .list_databases_for_platform(&request.platform)
-        .await?;
+        .await?
+        .into_iter()
+        .filter(|db| !db.ends_with("_main"))
+        .collect();
 
     if databases.is_empty() {
         // List available schemas so the developer can see what's registered

@@ -495,8 +495,8 @@ impl FunctionDeployer {
                 // Checksum matches — but verify the function actually exists in pg_proc.
                 // Functions can disappear from pg_proc due to DB restore, manual DROP,
                 // or other external events. If the function is missing, force re-deploy.
-                let exists = client
-                    .query_opt(
+                let rows = client
+                    .query(
                         "SELECT 1 FROM pg_proc
                          WHERE proname = $1
                          AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')",
@@ -515,7 +515,7 @@ impl FunctionDeployer {
                         }
                     })?;
 
-                if exists.is_none() {
+                if rows.is_empty() {
                     warn!(
                         "Function {} is tracked but missing from pg_proc in {} — forcing re-deploy",
                         signature.name, database

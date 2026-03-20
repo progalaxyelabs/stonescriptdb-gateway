@@ -281,7 +281,7 @@ fn is_allowed(ip: IpAddr) -> bool {
         // private network (prod): 192.168.1.10/24
         IpAddr::V4(v4) => {
             let octets = v4.octets();
-            octets[0] == 10 && octets[1] == 0 && octets[2] == 1
+            octets[0] == 172 && octets[1] == 16
         },
 
         _ => false

@@ -113,23 +113,24 @@ pub async fn migrate_all_schema(
         .collect();
 
     if databases.is_empty() {
-        // List available schemas so the developer can see what's registered
-        let available_schemas = state
-            .platform_state
-            .schema_store
-            .list_schemas(&request.platform)
-            .unwrap_or_default();
-
-        return Err(GatewayError::InvalidRequest {
-            message: format!(
-                "No databases found for platform '{}'. \
-                 This platform has {} registered schema(s): {:?}. \
-                 Databases are created via POST /v2/database — did you create one first?",
-                request.platform,
-                available_schemas.len(),
-                available_schemas,
-            ),
-        });
+        info!(
+            "No tenant databases found for platform '{}' — nothing to migrate",
+            request.platform
+        );
+        return Ok((
+            StatusCode::OK,
+            Json(MigrateAllResponse {
+                status: "completed".to_string(),
+                platform: request.platform,
+                schema_name: request.schema_name,
+                total_databases: 0,
+                succeeded: 0,
+                failed: 0,
+                results: vec![],
+                schema_validation: None,
+                execution_time_ms: start_time.elapsed().as_millis() as u64,
+            }),
+        ));
     }
 
     info!(

@@ -302,25 +302,28 @@ impl MigrationRunner {
             }
         }
 
-        // Kahn's algorithm
-        let mut queue: Vec<usize> = in_degree
+        // Kahn's algorithm — use VecDeque so pop_front() gives oldest-first (ascending name order)
+        let mut queue_vec: Vec<usize> = in_degree
             .iter()
             .enumerate()
             .filter(|(_, &deg)| deg == 0)
             .map(|(i, _)| i)
             .collect();
-        queue.sort_by(|a, b| migrations[*a].name.cmp(&migrations[*b].name)); // Stable sort by name
+        queue_vec.sort_by(|a, b| migrations[*a].name.cmp(&migrations[*b].name));
+        let mut queue: std::collections::VecDeque<usize> = queue_vec.into();
 
         let mut ordered_indices = Vec::new();
 
-        while let Some(idx) = queue.pop() {
+        while let Some(idx) = queue.pop_front() {
             ordered_indices.push(idx);
 
             for &dependent in &reverse_graph[idx] {
                 in_degree[dependent] -= 1;
                 if in_degree[dependent] == 0 {
-                    queue.push(dependent);
-                    queue.sort_by(|a, b| migrations[*a].name.cmp(&migrations[*b].name));
+                    // Insert in sorted position to maintain ascending name order
+                    let pos = queue.iter().position(|&q| migrations[q].name > migrations[dependent].name)
+                        .unwrap_or(queue.len());
+                    queue.insert(pos, dependent);
                 }
             }
         }
@@ -601,5 +604,67 @@ mod tests {
         assert_eq!(files[0].name, "001_init.pssql");
         assert_eq!(files[1].name, "002_add_col.pgsql");
         assert_eq!(files[2].name, "003_seed.sql");
+    }
+
+    #[test]
+    fn test_order_by_dependencies_preserves_alphabetical_for_independent_migrations() {
+        let temp_dir = TempDir::new().unwrap();
+        let migrations_dir = temp_dir.path();
+
+        // Create independent migrations (no table dependencies) with timestamps
+        // These should execute in alphabetical (oldest-first) order
+        fs::write(
+            migrations_dir.join("20260321_095900_fix.pgsql"),
+            "ALTER TABLE t ALTER COLUMN c TYPE UUID USING NULL;"
+        ).unwrap();
+        fs::write(
+            migrations_dir.join("20260321_100000_uuid.pgsql"),
+            "ALTER TABLE t ALTER COLUMN d TYPE UUID USING NULL;"
+        ).unwrap();
+        fs::write(
+            migrations_dir.join("20260322_120000_seed.pgsql"),
+            "INSERT INTO t VALUES (1);"
+        ).unwrap();
+        fs::write(
+            migrations_dir.join("20260322_200000_recalibrate.pgsql"),
+            "UPDATE t SET c = 1;"
+        ).unwrap();
+
+        let runner = MigrationRunner::new();
+        let files = runner.find_migration_files(migrations_dir).unwrap();
+        let ordered = runner.order_by_dependencies(files).unwrap();
+
+        // Must be oldest-first (ascending alphabetical by filename)
+        assert_eq!(ordered.len(), 4);
+        assert_eq!(ordered[0].name, "20260321_095900_fix.pgsql");
+        assert_eq!(ordered[1].name, "20260321_100000_uuid.pgsql");
+        assert_eq!(ordered[2].name, "20260322_120000_seed.pgsql");
+        assert_eq!(ordered[3].name, "20260322_200000_recalibrate.pgsql");
+    }
+
+    #[test]
+    fn test_order_by_dependencies_respects_table_dependencies() {
+        let temp_dir = TempDir::new().unwrap();
+        let migrations_dir = temp_dir.path();
+
+        // Migration 002 creates a table that 001 references via FK
+        // Even though 001 sorts first alphabetically, 002 must run first
+        fs::write(
+            migrations_dir.join("001_child.pgsql"),
+            "CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));"
+        ).unwrap();
+        fs::write(
+            migrations_dir.join("002_parent.pgsql"),
+            "CREATE TABLE parent (id INT PRIMARY KEY);"
+        ).unwrap();
+
+        let runner = MigrationRunner::new();
+        let files = runner.find_migration_files(migrations_dir).unwrap();
+        let ordered = runner.order_by_dependencies(files).unwrap();
+
+        // parent must come before child despite alphabetical order
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(ordered[0].name, "002_parent.pgsql");
+        assert_eq!(ordered[1].name, "001_child.pgsql");
     }
 }

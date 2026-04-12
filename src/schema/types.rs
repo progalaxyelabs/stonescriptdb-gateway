@@ -184,6 +184,26 @@ impl TypeChecker {
             return TypeCompatibility::Identical;
         }
 
+        // Handle array types: strip [] suffix and check inner type compatibility.
+        // e.g., VARCHAR[] -> VARCHAR(50)[] delegates to VARCHAR -> VARCHAR(50)
+        let from_is_array = from_normalized.ends_with("[]");
+        let to_is_array = to_normalized.ends_with("[]");
+        if from_is_array || to_is_array {
+            if from_is_array != to_is_array {
+                // One is array, other is not — incompatible
+                return TypeCompatibility::Incompatible {
+                    reason: format!(
+                        "Cannot change between array and non-array types: {} -> {}",
+                        from_type, to_type
+                    ),
+                };
+            }
+            // Both are arrays — check inner type compatibility
+            let from_inner = from_normalized.trim_end_matches("[]");
+            let to_inner = to_normalized.trim_end_matches("[]");
+            return self.check_compatibility(from_inner, to_inner);
+        }
+
         // Check for VARCHAR length changes
         if let Some(result) = self.check_varchar_change(&from_normalized, &to_normalized) {
             return result;
@@ -305,10 +325,12 @@ impl TypeChecker {
                 }
             }
             (None, Some(_)) => {
-                // Going from unlimited to limited - dataloss
-                Some(TypeCompatibility::DataLoss {
-                    reason: "May truncate: adding length limit".to_string(),
-                })
+                // Going from unlimited VARCHAR to VARCHAR(N).
+                // This adds a length constraint — PostgreSQL will reject if
+                // existing data exceeds N, so there's no silent truncation.
+                // Treated as safe because the schema file is the source of
+                // truth and the constraint is intentional.
+                Some(TypeCompatibility::Safe)
             }
             (None, None) => Some(TypeCompatibility::Safe),
         }
@@ -489,6 +511,46 @@ mod tests {
 
         // CHARACTER VARYING = VARCHAR
         assert!(checker.check_compatibility("CHARACTER VARYING(50)", "TEXT").is_safe());
+    }
+
+    #[test]
+    fn test_array_type_compatibility() {
+        let checker = TypeChecker::new();
+
+        // Same array type — identical
+        assert_eq!(
+            checker.check_compatibility("VARCHAR[]", "VARCHAR[]"),
+            TypeCompatibility::Identical
+        );
+        assert_eq!(
+            checker.check_compatibility("INTEGER[]", "INTEGER[]"),
+            TypeCompatibility::Identical
+        );
+
+        // VARCHAR[] -> VARCHAR(N)[] — safe (adding length constraint to inner type)
+        // This is the specific case from task #2260
+        assert!(checker.check_compatibility("VARCHAR[]", "VARCHAR(50)[]").is_safe());
+        assert!(checker.check_compatibility("VARCHAR[]", "VARCHAR(255)[]").is_safe());
+
+        // VARCHAR(50)[] -> VARCHAR(100)[] — safe (widening inner length)
+        assert!(checker.check_compatibility("VARCHAR(50)[]", "VARCHAR(100)[]").is_safe());
+
+        // VARCHAR(100)[] -> VARCHAR(50)[] — dataloss (narrowing inner length)
+        let result = checker.check_compatibility("VARCHAR(100)[]", "VARCHAR(50)[]");
+        assert!(matches!(result, TypeCompatibility::DataLoss { .. }));
+
+        // INTEGER[] -> BIGINT[] — safe (inner type widening)
+        assert!(checker.check_compatibility("INTEGER[]", "BIGINT[]").is_safe());
+
+        // BIGINT[] -> INTEGER[] — dataloss (inner type narrowing)
+        let result = checker.check_compatibility("BIGINT[]", "INTEGER[]");
+        assert!(matches!(result, TypeCompatibility::DataLoss { .. }));
+
+        // Array vs non-array — incompatible
+        let result = checker.check_compatibility("VARCHAR[]", "VARCHAR");
+        assert!(matches!(result, TypeCompatibility::Incompatible { .. }));
+        let result = checker.check_compatibility("INTEGER", "INTEGER[]");
+        assert!(matches!(result, TypeCompatibility::Incompatible { .. }));
     }
 
     #[test]

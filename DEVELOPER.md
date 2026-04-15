@@ -64,7 +64,7 @@ All config via environment variables (see `.env.example`):
 
 ## Key Concepts
 
-- **Platform**: A registered application (e.g., "medstoreapp") with its own schema
+- **Platform**: A registered application (e.g., "myapp") with its own schema
 - **Schema**: SQL files (tables, functions, migrations) uploaded as tar.gz
 - **Main DB**: `{platform}_main` — platform-level data
 - **Tenant DB**: `{platform}_{uuid}` — per-tenant isolated database
@@ -82,6 +82,29 @@ To change a column type, use the gateway's exemption mechanism in a migration fi
 ```sql
 SELECT _stonescriptdb_gateway_change_column_type('table', 'column', 'NEW_TYPE', 'migration_fn');
 ```
+
+### Rename and Drop primitives
+
+The same pattern exists for column renames and intentional drops:
+
+```sql
+-- Rename: diff collapses DropColumn(old) + AddColumn(new) to a no-op.
+SELECT _stonescriptdb_gateway_rename_column('table', 'old_col', 'new_col', 'rename_helper');
+
+-- Intentional drop: diff marks DropColumn as Safe.
+SELECT _stonescriptdb_gateway_drop_column('table', 'col', 'drop_helper');
+```
+
+**Philosophy (all three primitives):** the gateway is a thin wrapper. Your helper
+function does ALL the SQL work — the gateway only records the exemption so the
+schema-diff checker accepts the resulting state.
+
+**Cascade is the developer's responsibility.** If your drop needs
+`DROP COLUMN ... CASCADE`, or you must drop dependent views / foreign keys /
+functions first, write that SQL in your helper. The gateway does not enumerate
+dependents, does not require a declared dependent list, and does not impose a
+cascade policy. This is consistent with `_change_column_type` — the gateway makes
+no assumptions about the SQL you run.
 
 ## Version Management
 

@@ -11,7 +11,9 @@ use crate::error::{GatewayError, Result};
 use crate::schema::MigrationRunner;
 use regex::Regex;
 use std::path::Path;
-use tracing::debug;
+use tracing::{debug, info, warn};
+
+const FN_TOKEN: &str = "_stonescriptdb_gateway_change_column_type";
 
 /// A column type change that is being handled by a gateway migration function.
 #[derive(Debug, Clone)]
@@ -33,6 +35,8 @@ pub fn scan_migrations_for_exemptions(
     let migration_files = runner.find_migration_files(migrations_dir)?;
 
     let mut exemptions = Vec::new();
+    let mut files_scanned = 0usize;
+    let mut files_skipped_applied = 0usize;
 
     // Regex to match: _stonescriptdb_gateway_change_column_type('table', 'column', 'type', 'func')
     // Tolerant of whitespace, newlines, and various quoting styles
@@ -43,8 +47,12 @@ pub fn scan_migrations_for_exemptions(
     })?;
 
     for migration in &migration_files {
-        // Skip already-applied migrations
         if applied_migrations.contains(&migration.name) {
+            debug!(
+                "Type-change scanner: skipping already-applied migration {}",
+                migration.name
+            );
+            files_skipped_applied += 1;
             continue;
         }
 
@@ -54,14 +62,19 @@ pub fn scan_migrations_for_exemptions(
             }
         })?;
 
+        files_scanned += 1;
+        let mut captures_in_file = 0usize;
+
         for caps in re.captures_iter(&content) {
             let table = caps[1].to_string();
             let column = caps[2].to_string();
             let new_type = caps[3].to_string();
+            let helper_fn = caps[4].to_string();
+            captures_in_file += 1;
 
-            debug!(
-                "Found column type exemption in {}: {}.{} -> {}",
-                migration.name, table, column, new_type
+            info!(
+                "Type-change exemption registered: {}.{} -> {} via helper '{}' (migration: {})",
+                table, column, new_type, helper_fn, migration.name
             );
 
             exemptions.push(ColumnTypeExemption {
@@ -71,14 +84,24 @@ pub fn scan_migrations_for_exemptions(
                 migration_file: migration.name.clone(),
             });
         }
+
+        if captures_in_file == 0 && content.contains(FN_TOKEN) {
+            warn!(
+                "Type-change scanner: {} contains '{}' but no calls matched the expected \
+                 signature ('table','column','new_type','helper_fn') with single quotes. The \
+                 exemption will NOT be applied — the migration will be blocked. Check for \
+                 typos, double quotes, or line-broken args.",
+                migration.name, FN_TOKEN
+            );
+        }
     }
 
-    if !exemptions.is_empty() {
-        debug!(
-            "Found {} column type exemption(s) in pending migrations",
-            exemptions.len()
-        );
-    }
+    info!(
+        "Type-change scanner: {} exemption(s) across {} scanned file(s) ({} already-applied skipped)",
+        exemptions.len(),
+        files_scanned,
+        files_skipped_applied
+    );
 
     Ok(exemptions)
 }

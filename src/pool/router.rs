@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_identifier() {
-        assert_eq!(sanitize_identifier("MedStoreApp"), "myapp");
+        assert_eq!(sanitize_identifier("MyApp"), "myapp");
         assert_eq!(sanitize_identifier("clinic-001"), "clinic_001");
         assert_eq!(sanitize_identifier("test app"), "test_app");
         assert_eq!(sanitize_identifier("__test__"), "test");

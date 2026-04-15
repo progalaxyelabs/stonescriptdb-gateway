@@ -4,7 +4,7 @@
 //! Schemas are stored on disk in the gateway's data directory.
 //!
 //! Directory structure:
-//! ```
+//! ```text
 //! {data_dir}/{platform}/
 //!   ├── platform.json       # Platform metadata
 //!   ├── main_db/

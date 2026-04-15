@@ -181,11 +181,14 @@ pub async fn migrate_all_schema(
     let mut failed = 0;
 
     for (i, db_name) in databases.iter().enumerate() {
+        let tenant_start = Instant::now();
         info!(
-            "  [{}/{}] Migrating database '{}'",
+            "  [{}/{}] tenant={} START migrate (force={}, validate_schema={})",
             i + 1,
             databases.len(),
-            db_name
+            db_name,
+            request.force,
+            i == 0,
         );
 
         match migrate_single_database(
@@ -216,6 +219,16 @@ pub async fn migrate_all_schema(
                         schema_validation = Some(diff_to_validation_info(&d));
                     }
                 }
+                info!(
+                    "  [{}/{}] tenant={} OK migrations={} tables={} functions={} elapsed={}ms",
+                    i + 1,
+                    databases.len(),
+                    db_name,
+                    migrations,
+                    tables,
+                    functions,
+                    tenant_start.elapsed().as_millis()
+                );
                 results.push(DatabaseMigrationResult {
                     database: db_name.clone(),
                     status: "completed".to_string(),
@@ -227,7 +240,18 @@ pub async fn migrate_all_schema(
                 succeeded += 1;
             }
             Err(e) => {
-                warn!("  Failed to migrate '{}': {}", db_name, e);
+                // Log BOTH Display (user-facing) and Debug (structured) so operators
+                // have full context. Include elapsed + index so it's easy to correlate
+                // with the START line when grepping by tenant.
+                warn!(
+                    "  [{}/{}] tenant={} FAIL elapsed={}ms error={}",
+                    i + 1,
+                    databases.len(),
+                    db_name,
+                    tenant_start.elapsed().as_millis(),
+                    e
+                );
+                warn!("  [{}/{}] tenant={} error_debug={:?}", i + 1, databases.len(), db_name, e);
                 results.push(DatabaseMigrationResult {
                     database: db_name.clone(),
                     status: "failed".to_string(),
@@ -284,9 +308,33 @@ pub async fn migrate_all_schema(
     };
 
     info!(
-        "Migrate-all complete for platform '{}': {}/{} succeeded in {}ms",
-        request.platform, succeeded, total_databases, execution_time_ms
+        "Migrate-all complete for platform '{}': {}/{} succeeded, {} failed in {}ms",
+        request.platform, succeeded, total_databases, failed, execution_time_ms
     );
+
+    // Post-mortem summary: when some tenants failed, emit a single grep-friendly
+    // block listing each failed tenant + its error. This is the log block to
+    // read when investigating "why did tenant2 fail but tenant1 succeed".
+    if failed > 0 {
+        warn!(
+            "Migrate-all failures for platform '{}' ({} of {} tenants):",
+            request.platform, failed, total_databases
+        );
+        for r in &results {
+            if r.status == "failed" {
+                warn!(
+                    "  FAILED tenant={} migrations_applied={} tables={} functions={} error={}",
+                    r.database,
+                    r.migrations_applied,
+                    r.tables_created,
+                    r.functions_updated,
+                    r.error.as_deref().unwrap_or("(no error message)")
+                );
+            } else if r.status == "skipped" {
+                warn!("  SKIPPED tenant={} reason={}", r.database, r.error.as_deref().unwrap_or(""));
+            }
+        }
+    }
 
     Ok((
         StatusCode::OK,

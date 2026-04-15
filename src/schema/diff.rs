@@ -12,7 +12,9 @@
 use crate::error::{GatewayError, Result};
 use crate::schema::column_type_exemptions::{self, ColumnTypeExemption};
 use crate::schema::dependency::DependencyAnalyzer;
+use crate::schema::drop_column_exemptions::{self, DropColumnExemption};
 use crate::schema::migration::MigrationRunner;
+use crate::schema::rename_column_exemptions::{self, RenameColumnExemption};
 use crate::schema::types::{TypeChecker, TypeCompatibility};
 use deadpool_postgres::Pool;
 use serde::Serialize;
@@ -20,6 +22,58 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tracing::{debug, info, warn};
+
+/// Bundle of schema-diff exemptions extracted from pending migrations.
+///
+/// Each variant tells the diff checker that a seemingly-unsafe change is actually
+/// being handled by a gateway-wrapped developer helper:
+/// - `type_changes`: `_stonescriptdb_gateway_change_column_type` — dev-written fn
+///   handles type change, old-column drop, new-column rename.
+/// - `renames`: `_stonescriptdb_gateway_rename_column` — dev-written fn runs
+///   `ALTER TABLE ... RENAME COLUMN`. Diff collapses DropColumn(old)+AddColumn(new)
+///   to a no-op.
+/// - `drops`: `_stonescriptdb_gateway_drop_column` — dev-written fn runs the actual
+///   DROP. Cascade, dependent views, FK constraints are ALL the developer's
+///   responsibility — the gateway does not enumerate dependents or impose policy.
+#[derive(Debug, Clone, Default)]
+pub struct MigrationExemptions {
+    pub type_changes: Vec<ColumnTypeExemption>,
+    pub renames: Vec<RenameColumnExemption>,
+    pub drops: Vec<DropColumnExemption>,
+}
+
+impl MigrationExemptions {
+    pub fn is_empty(&self) -> bool {
+        self.type_changes.is_empty() && self.renames.is_empty() && self.drops.is_empty()
+    }
+
+    fn type_change_matches(&self, table: &str, column: &str) -> bool {
+        self.type_changes
+            .iter()
+            .any(|e| e.table == table && e.column == column)
+    }
+
+    /// Returns the matching rename exemption if `(table, column)` is the old-name side.
+    fn find_rename_old(&self, table: &str, column: &str) -> Option<&RenameColumnExemption> {
+        self.renames
+            .iter()
+            .find(|e| e.table == table && e.old_column == column)
+    }
+
+    /// Returns the matching rename exemption if `(table, column)` is the new-name side.
+    fn find_rename_new(&self, table: &str, column: &str) -> Option<&RenameColumnExemption> {
+        self.renames
+            .iter()
+            .find(|e| e.table == table && e.new_column == column)
+    }
+
+    /// Returns the matching intentional-drop exemption for `(table, column)`.
+    fn find_intentional_drop(&self, table: &str, column: &str) -> Option<&DropColumnExemption> {
+        self.drops
+            .iter()
+            .find(|e| e.table == table && e.column == column)
+    }
+}
 
 /// Represents a column in the schema
 #[derive(Debug, Clone, Serialize)]
@@ -313,19 +367,20 @@ impl SchemaDiffChecker {
         desired: &HashMap<String, TableSchema>,
         current: &HashMap<String, TableSchema>,
     ) -> SchemaDiff {
-        self.diff_schemas_with_exemptions(desired, current, &[])
+        self.diff_schemas_with_exemptions(desired, current, &MigrationExemptions::default())
     }
 
-    /// Compare desired schema against current schema, with column type exemptions.
+    /// Compare desired schema against current schema, honoring migration exemptions.
     ///
-    /// Exemptions are columns whose type changes are handled by
-    /// `_stonescriptdb_gateway_change_column_type` in pending migrations.
-    /// These specific columns are marked as Safe instead of DataLoss/Incompatible.
+    /// Exemptions are extracted from pending migration files that call the
+    /// gateway-provided wrapper functions (`_stonescriptdb_gateway_change_column_type`,
+    /// `_stonescriptdb_gateway_rename_column`, `_stonescriptdb_gateway_drop_column`).
+    /// The diff checker treats the corresponding changes as Safe.
     pub fn diff_schemas_with_exemptions(
         &self,
         desired: &HashMap<String, TableSchema>,
         current: &HashMap<String, TableSchema>,
-        exemptions: &[ColumnTypeExemption],
+        exemptions: &MigrationExemptions,
     ) -> SchemaDiff {
         let mut diff = SchemaDiff::new();
 
@@ -376,7 +431,7 @@ impl SchemaDiffChecker {
         table_name: &str,
         desired: &TableSchema,
         current: &TableSchema,
-        exemptions: &[ColumnTypeExemption],
+        exemptions: &MigrationExemptions,
     ) {
         // Check for new and modified columns
         for (col_name, desired_col) in &desired.columns {
@@ -387,9 +442,22 @@ impl SchemaDiffChecker {
                     // gets dropped and the new one renamed. The diff sees the desired column
                     // as "new" because the old column has a different type. If an exemption
                     // exists for this (table, column), the migration will handle it.
-                    let is_exempted = exemptions.iter().any(|e| e.table == table_name && e.column.as_str() == col_name);
+                    let exempt_reason: Option<String> = if exemptions.type_change_matches(table_name, col_name) {
+                        Some("Column type change handled by _stonescriptdb_gateway_change_column_type in pending migration".to_string())
+                    } else if let Some(r) = exemptions.find_rename_new(table_name, col_name) {
+                        info!(
+                            "Diff: AddColumn {}.{} marked Safe — rename from '{}' via helper '{}' (migration: {})",
+                            table_name, col_name, r.old_column, r.helper_fn, r.migration_file
+                        );
+                        Some(format!(
+                            "Column rename from '{}' handled by _stonescriptdb_gateway_rename_column (helper '{}', migration: {})",
+                            r.old_column, r.helper_fn, r.migration_file
+                        ))
+                    } else {
+                        None
+                    };
 
-                    if is_exempted {
+                    if let Some(reason) = exempt_reason {
                         diff.add_change(SchemaChange {
                             table: table_name.to_string(),
                             change_type: ChangeType::AddColumn,
@@ -397,10 +465,7 @@ impl SchemaDiffChecker {
                             from_type: None,
                             to_type: Some(desired_col.full_type()),
                             compatibility: ChangeCompatibility::Safe,
-                            reason: Some(
-                                "Column type change handled by _stonescriptdb_gateway_change_column_type in pending migration"
-                                    .to_string(),
-                            ),
+                            reason: Some(reason),
                         });
                     } else {
                         let compatibility = if !desired_col.is_nullable
@@ -479,9 +544,31 @@ impl SchemaDiffChecker {
         // match what's in the desired schema. If an exemption covers this column, skip it.
         for col_name in current.columns.keys() {
             if !desired.columns.contains_key(col_name) {
-                let is_exempted = exemptions.iter().any(|e| e.table == table_name && e.column.as_str() == col_name);
+                let drop_exempt_reason: Option<String> = if exemptions.type_change_matches(table_name, col_name) {
+                    Some("Column drop handled by _stonescriptdb_gateway_change_column_type in pending migration".to_string())
+                } else if let Some(r) = exemptions.find_rename_old(table_name, col_name) {
+                    info!(
+                        "Diff: DropColumn {}.{} marked Safe — rename to '{}' via helper '{}' (migration: {})",
+                        table_name, col_name, r.new_column, r.helper_fn, r.migration_file
+                    );
+                    Some(format!(
+                        "Column rename to '{}' handled by _stonescriptdb_gateway_rename_column (helper '{}', migration: {})",
+                        r.new_column, r.helper_fn, r.migration_file
+                    ))
+                } else if let Some(d) = exemptions.find_intentional_drop(table_name, col_name) {
+                    info!(
+                        "Diff: DropColumn {}.{} marked Safe — intentional drop via helper '{}' (migration: {}; cascade is developer's responsibility)",
+                        table_name, col_name, d.helper_fn, d.migration_file
+                    );
+                    Some(format!(
+                        "Intentional drop handled by _stonescriptdb_gateway_drop_column (helper '{}', migration: {}; cascade is the developer's responsibility)",
+                        d.helper_fn, d.migration_file
+                    ))
+                } else {
+                    None
+                };
 
-                if is_exempted {
+                if let Some(reason) = drop_exempt_reason {
                     diff.add_change(SchemaChange {
                         table: table_name.to_string(),
                         change_type: ChangeType::DropColumn,
@@ -489,10 +576,7 @@ impl SchemaDiffChecker {
                         from_type: Some(current.columns[col_name].full_type()),
                         to_type: None,
                         compatibility: ChangeCompatibility::Safe,
-                        reason: Some(
-                            "Column drop handled by _stonescriptdb_gateway_change_column_type in pending migration"
-                                .to_string(),
-                        ),
+                        reason: Some(reason),
                     });
                 } else {
                     diff.add_change(SchemaChange {
@@ -517,7 +601,7 @@ impl SchemaDiffChecker {
         col_name: &str,
         desired: &ColumnSchema,
         current: &ColumnSchema,
-        exemptions: &[ColumnTypeExemption],
+        exemptions: &MigrationExemptions,
     ) {
         let desired_type = desired.full_type();
         let current_type = current.full_type();
@@ -542,9 +626,7 @@ impl SchemaDiffChecker {
             }
             TypeCompatibility::DataLoss { ref reason } | TypeCompatibility::Incompatible { ref reason } => {
                 // Check if this column type change is exempted by a pending migration
-                let is_exempted = exemptions.iter().any(|e| {
-                    e.table == table_name && e.column.as_str() == col_name
-                });
+                let is_exempted = exemptions.type_change_matches(table_name, col_name);
 
                 if is_exempted {
                     info!(
@@ -604,22 +686,40 @@ impl SchemaDiffChecker {
         // Query current schema
         let current = self.query_current_schema(pool, database).await?;
 
-        // Scan pending migrations for column type exemptions
+        // Scan pending migrations for exemptions (type changes, renames, drops)
         let migration_runner = MigrationRunner::new();
         migration_runner.ensure_migrations_table(pool, database).await?;
         let applied = migration_runner.get_applied_migrations(pool, database).await?;
-        let exemptions = column_type_exemptions::scan_migrations_for_exemptions(migrations_dir, &applied)?;
+        let exemptions = MigrationExemptions {
+            type_changes: column_type_exemptions::scan_migrations_for_exemptions(migrations_dir, &applied)?,
+            renames: rename_column_exemptions::scan_migrations_for_exemptions(migrations_dir, &applied)?,
+            drops: drop_column_exemptions::scan_migrations_for_exemptions(migrations_dir, &applied)?,
+        };
 
         if !exemptions.is_empty() {
             info!(
-                "Found {} column type exemption(s) from pending migrations for {}",
-                exemptions.len(),
-                database
+                "Migration exemptions for {}: {} type-change, {} rename, {} drop",
+                database,
+                exemptions.type_changes.len(),
+                exemptions.renames.len(),
+                exemptions.drops.len()
             );
-            for ex in &exemptions {
+            for ex in &exemptions.type_changes {
                 info!(
-                    "  - {}.{} -> {} (migration: {})",
+                    "  type-change: {}.{} -> {} (migration: {})",
                     ex.table, ex.column, ex.new_type, ex.migration_file
+                );
+            }
+            for ex in &exemptions.renames {
+                info!(
+                    "  rename: {}.{} -> {} (migration: {})",
+                    ex.table, ex.old_column, ex.new_column, ex.migration_file
+                );
+            }
+            for ex in &exemptions.drops {
+                info!(
+                    "  drop: {}.{} (migration: {})",
+                    ex.table, ex.column, ex.migration_file
                 );
             }
         }
@@ -940,5 +1040,121 @@ mod tests {
         assert_eq!(diff.safe_changes.len(), 1);
         assert_eq!(diff.safe_changes[0].change_type, ChangeType::AddColumn);
         assert_eq!(diff.safe_changes[0].column, Some("email".to_string()));
+    }
+
+    fn col(name: &str, ty: &str) -> ColumnSchema {
+        ColumnSchema {
+            name: name.to_string(),
+            data_type: ty.to_string(),
+            is_nullable: true,
+            column_default: None,
+            character_maximum_length: None,
+            numeric_precision: None,
+            numeric_scale: None,
+        }
+    }
+
+    fn table_with(cols: Vec<(&str, &str)>) -> TableSchema {
+        let mut m = HashMap::new();
+        for (n, t) in cols {
+            m.insert(n.to_string(), col(n, t));
+        }
+        TableSchema {
+            name: "t".to_string(),
+            columns: m,
+        }
+    }
+
+    #[test]
+    fn test_rename_exemption_collapses_drop_and_add_to_safe() {
+        let checker = SchemaDiffChecker::new();
+
+        let mut desired = HashMap::new();
+        desired.insert("t".to_string(), table_with(vec![("new_id", "INTEGER")]));
+
+        let mut current = HashMap::new();
+        current.insert("t".to_string(), table_with(vec![("old_id", "INTEGER")]));
+
+        // Without exemption: drop + add would be flagged (drop is DataLoss).
+        let diff_plain = checker.diff_schemas(&desired, &current);
+        assert!(!diff_plain.is_safe(), "expected plain diff to flag drop");
+
+        // With rename exemption, both sides should be Safe.
+        let exemptions = MigrationExemptions {
+            renames: vec![RenameColumnExemption {
+                table: "t".to_string(),
+                old_column: "old_id".to_string(),
+                new_column: "new_id".to_string(),
+                helper_fn: "_rename_helper".to_string(),
+                migration_file: "001.pgsql".to_string(),
+            }],
+            ..Default::default()
+        };
+        let diff = checker.diff_schemas_with_exemptions(&desired, &current, &exemptions);
+        assert!(diff.is_safe(), "rename exemption should make diff safe");
+        assert_eq!(diff.safe_changes.len(), 2);
+    }
+
+    #[test]
+    fn test_drop_exemption_marks_drop_safe() {
+        let checker = SchemaDiffChecker::new();
+
+        let mut desired = HashMap::new();
+        desired.insert("t".to_string(), table_with(vec![("keep", "INTEGER")]));
+
+        let mut current = HashMap::new();
+        current.insert(
+            "t".to_string(),
+            table_with(vec![("keep", "INTEGER"), ("drop_me", "TEXT")]),
+        );
+
+        let diff_plain = checker.diff_schemas(&desired, &current);
+        assert!(!diff_plain.is_safe());
+
+        let exemptions = MigrationExemptions {
+            drops: vec![DropColumnExemption {
+                table: "t".to_string(),
+                column: "drop_me".to_string(),
+                helper_fn: "_drop_helper".to_string(),
+                migration_file: "001.pgsql".to_string(),
+            }],
+            ..Default::default()
+        };
+        let diff = checker.diff_schemas_with_exemptions(&desired, &current, &exemptions);
+        assert!(diff.is_safe(), "drop exemption should make diff safe");
+        assert_eq!(diff.safe_changes.len(), 1);
+        assert_eq!(diff.safe_changes[0].change_type, ChangeType::DropColumn);
+    }
+
+    #[test]
+    fn test_unrelated_drop_still_blocked_when_only_one_column_exempted() {
+        let checker = SchemaDiffChecker::new();
+
+        let mut desired = HashMap::new();
+        desired.insert("t".to_string(), table_with(vec![("keep", "INTEGER")]));
+
+        let mut current = HashMap::new();
+        current.insert(
+            "t".to_string(),
+            table_with(vec![
+                ("keep", "INTEGER"),
+                ("drop_me", "TEXT"),
+                ("also_drop", "TEXT"),
+            ]),
+        );
+
+        let exemptions = MigrationExemptions {
+            drops: vec![DropColumnExemption {
+                table: "t".to_string(),
+                column: "drop_me".to_string(),
+                helper_fn: "_drop_helper".to_string(),
+                migration_file: "001.pgsql".to_string(),
+            }],
+            ..Default::default()
+        };
+        let diff = checker.diff_schemas_with_exemptions(&desired, &current, &exemptions);
+        assert!(!diff.is_safe(), "unlisted drop must still be flagged");
+        assert_eq!(diff.dataloss_changes.len(), 1);
+        assert_eq!(diff.dataloss_changes[0].column, Some("also_drop".to_string()));
     }
 }

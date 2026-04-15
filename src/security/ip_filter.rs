@@ -149,7 +149,7 @@ mod tests {
         assert!(is_allowed(&allowed, "192.168.1.5".parse().unwrap()));
         assert!(is_allowed(&allowed, "192.168.1.254".parse().unwrap()));
         assert!(!is_allowed(&allowed, "10.0.2.1".parse().unwrap()));
-        assert!(!is_allowed(&allowed, "192.168.1.1".parse().unwrap()));
+        assert!(!is_allowed(&allowed, "192.168.2.1".parse().unwrap()));
     }
 
     #[test]

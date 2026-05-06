@@ -90,11 +90,11 @@ The gateway runs in a dedicated VM alongside PostgreSQL, separate from the Docke
 
 ```
 DEV Environment:
-  Docker containers on host (rootless) → VM IP (e.g., 192.168.1.100:9000)
+  Docker containers on host (rootless) → VM IP (e.g., 10.0.x.x:9000)
   Gateway on VM → localhost:5432 (PostgreSQL on same VM)
 
 PROD Environment:
-  Platform containers (Docker Swarm) → VM IP (e.g., 192.168.1.10:9000)
+  Platform containers (Docker Swarm) → VM IP (e.g., 172.16.x.x:9000)
   Gateway on VM → localhost:5432 (PostgreSQL on same VM)
 ```
 
@@ -278,7 +278,7 @@ fn is_allowed(ip: IpAddr) -> bool {
         IpAddr::V4(v4) if v4.is_loopback() => true,
         IpAddr::V6(v6) if v6.is_loopback() => true,
 
-        // private network (prod): 192.168.1.10/24
+        // private network (Docker overlay): 172.16.0.0/12
         IpAddr::V4(v4) => {
             let octets = v4.octets();
             octets[0] == 172 && octets[1] == 16
@@ -469,7 +469,7 @@ MAX_TOTAL_CONNECTIONS=200
 POOL_IDLE_TIMEOUT_SECS=1800
 
 # Security
-ALLOWED_NETWORKS=127.0.0.0/8,192.168.1.10/24
+ALLOWED_NETWORKS=127.0.0.0/8,172.16.0.0/12
 
 # Logging
 RUST_LOG=info

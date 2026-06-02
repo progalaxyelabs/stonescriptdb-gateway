@@ -143,6 +143,112 @@ pub enum ChangeCompatibility {
     Incompatible,
 }
 
+/// Maps a guarded (potentially destructive) `ChangeType` to its allow-token and
+/// the operator-facing CLI flag that unlocks it.
+///
+/// Returns `None` for change types that the diff never classifies as
+/// DataLoss/Incompatible (e.g. `CreateTable` is always Safe; `ModifyColumnDefault`
+/// is never emitted). Such changes are never blocked, so they need no token.
+///
+/// The five guarded operations are the only `ChangeType`s that can land in
+/// `dataloss_changes` / `incompatible_changes` (see `SchemaDiffChecker::diff`).
+pub fn guarded_op_token(change_type: &ChangeType) -> Option<(&'static str, &'static str)> {
+    match change_type {
+        ChangeType::DropTable => Some(("drop_table", "--allow-drop-table")),
+        ChangeType::DropColumn => Some(("drop_column", "--allow-drop-column")),
+        ChangeType::ModifyColumnType => {
+            Some(("modify_column_type", "--allow-column-type-change"))
+        }
+        ChangeType::AddColumn => Some(("add_not_null_column", "--allow-add-not-null-column")),
+        ChangeType::ModifyColumnNullable => Some(("set_not_null", "--allow-set-not-null")),
+        ChangeType::CreateTable | ChangeType::ModifyColumnDefault => None,
+    }
+}
+
+/// Operator-granted permissions for guarded (destructive) schema operations.
+///
+/// Two independent gates are controlled here:
+///   1. The per-operation diff dataloss/incompatible gate → `allow` tokens.
+///   2. The holistic post-migration schema-verification gate → `skip_verification`.
+///
+/// `force` is the back-compat "allow everything" escape hatch: it permits ALL
+/// guarded operations AND bypasses verification (the legacy `force=true` behavior).
+#[derive(Debug, Clone, Default)]
+pub struct MigrationGuards {
+    /// Allow-tokens for specific guarded diff operations (e.g. `"drop_column"`).
+    pub allow: Vec<String>,
+    /// Bypass the holistic post-migration verification gate only.
+    pub skip_verification: bool,
+    /// Legacy allow-all: permits every guarded op and skips verification.
+    pub force: bool,
+}
+
+impl MigrationGuards {
+    pub fn new(allow: Vec<String>, skip_verification: bool, force: bool) -> Self {
+        Self { allow, skip_verification, force }
+    }
+
+    /// Allow-all back-compat constructor (equivalent to the old `force=true`).
+    pub fn force_all() -> Self {
+        Self { allow: Vec::new(), skip_verification: false, force: true }
+    }
+
+    /// Is this specific guarded operation permitted — by an explicit allow token
+    /// or by the allow-all `force` escape hatch?
+    pub fn allows_token(&self, token: &str) -> bool {
+        self.force || self.allow.iter().any(|a| a == token)
+    }
+
+    /// Should the post-migration verification gate be bypassed?
+    pub fn skip_verification(&self) -> bool {
+        self.force || self.skip_verification
+    }
+}
+
+/// Pure least-privilege gate decision: given a computed diff and the operator's
+/// granted permissions, return the list of guarded operations that are NOT
+/// permitted (each line names the exact `--allow-*` flag that unlocks it).
+///
+/// An empty result means the migration may proceed. This is extracted from
+/// `validate_migration` so the gating logic is unit-testable without a DB pool.
+pub fn evaluate_guarded_changes(diff: &SchemaDiff, guards: &MigrationGuards) -> Vec<String> {
+    let mut blocked: Vec<String> = Vec::new();
+    if diff.is_safe() {
+        return blocked;
+    }
+
+    for change in diff
+        .dataloss_changes
+        .iter()
+        .chain(diff.incompatible_changes.iter())
+    {
+        let token_and_flag = guarded_op_token(&change.change_type);
+        let permitted = match token_and_flag {
+            Some((token, _flag)) => guards.allows_token(token),
+            // A guarded change with no mapped token can only be bypassed by the
+            // allow-all `force` escape hatch — fail closed otherwise.
+            None => guards.force,
+        };
+
+        if !permitted {
+            let flag = token_and_flag.map(|(_, f)| f).unwrap_or("--force");
+            blocked.push(format!(
+                "{:?} {}.{}: {} [unlock with {}]",
+                change.change_type,
+                change.table,
+                change.column.as_deref().unwrap_or("*"),
+                change
+                    .reason
+                    .as_deref()
+                    .unwrap_or("potential data loss / incompatible change"),
+                flag,
+            ));
+        }
+    }
+
+    blocked
+}
+
 /// Result of schema diff
 #[derive(Debug, Clone, Serialize)]
 pub struct SchemaDiff {
@@ -665,15 +771,18 @@ impl SchemaDiffChecker {
         }
     }
 
-    /// Validate schema changes before migration
-    /// Returns Ok if safe, Err if dataloss/incompatible changes detected
+    /// Validate schema changes before migration.
+    ///
+    /// Returns Ok if every dataloss/incompatible change is individually permitted
+    /// by `guards` (or `force`), Err naming each un-permitted guarded operation and
+    /// the exact `--allow-*` flag that would unlock it.
     pub async fn validate_migration(
         &self,
         pool: &Pool,
         database: &str,
         tables_dir: &Path,
         migrations_dir: &Path,
-        force: bool,
+        guards: &MigrationGuards,
     ) -> Result<SchemaDiff> {
         // Parse desired schema
         let desired = self.parse_desired_schema(tables_dir)?;
@@ -774,37 +883,17 @@ impl SchemaDiffChecker {
             }
         }
 
-        // Check if we should block
-        if !diff.is_safe() && !force {
-            let mut reasons = Vec::new();
-
-            for change in &diff.dataloss_changes {
-                reasons.push(format!(
-                    "{:?} {}.{}: {}",
-                    change.change_type,
-                    change.table,
-                    change.column.as_deref().unwrap_or("*"),
-                    change.reason.as_deref().unwrap_or("potential data loss")
-                ));
-            }
-
-            for change in &diff.incompatible_changes {
-                reasons.push(format!(
-                    "{:?} {}.{}: {}",
-                    change.change_type,
-                    change.table,
-                    change.column.as_deref().unwrap_or("*"),
-                    change.reason.as_deref().unwrap_or("incompatible types")
-                ));
-            }
-
+        // Per-operation least-privilege gate. Pure decision logic lives in
+        // `evaluate_guarded_changes` so it can be unit-tested without a DB pool.
+        let blocked = evaluate_guarded_changes(&diff, guards);
+        if !blocked.is_empty() {
             return Err(GatewayError::MigrationFailed {
                 database: database.to_string(),
                 migration: "schema validation".to_string(),
                 cause: format!(
-                    "Schema changes blocked due to potential data loss. {} issues found:\n  - {}\n\nUse force=true to proceed anyway.",
-                    reasons.len(),
-                    reasons.join("\n  - ")
+                    "Schema changes blocked: {} guarded operation(s) not permitted:\n  - {}\n\nGrant the specific --allow-* flag(s) shown above, or use --force to allow ALL guarded operations.",
+                    blocked.len(),
+                    blocked.join("\n  - ")
                 ),
             });
         }
@@ -1156,5 +1245,154 @@ mod tests {
         assert!(!diff.is_safe(), "unlisted drop must still be flagged");
         assert_eq!(diff.dataloss_changes.len(), 1);
         assert_eq!(diff.dataloss_changes[0].column, Some("also_drop".to_string()));
+    }
+
+    // ─── Granular per-operation --allow-* gate (#2810) ──────────────────────
+
+    /// Build a SchemaDiff containing a single guarded (DataLoss) change of the
+    /// given type — exercises the gate directly, independent of type classification.
+    fn guarded_diff(change_type: ChangeType) -> SchemaDiff {
+        let mut d = SchemaDiff::new();
+        d.add_change(SchemaChange {
+            table: "t".to_string(),
+            change_type,
+            column: Some("c".to_string()),
+            from_type: None,
+            to_type: None,
+            compatibility: ChangeCompatibility::DataLoss,
+            reason: Some("test".to_string()),
+        });
+        d
+    }
+
+    fn allow_only(tokens: &[&str]) -> MigrationGuards {
+        MigrationGuards::new(tokens.iter().map(|s| s.to_string()).collect(), false, false)
+    }
+
+    /// The five guarded ops paired with their allow-token.
+    fn guarded_cases() -> Vec<(ChangeType, &'static str)> {
+        vec![
+            (ChangeType::DropTable, "drop_table"),
+            (ChangeType::DropColumn, "drop_column"),
+            (ChangeType::ModifyColumnType, "modify_column_type"),
+            (ChangeType::AddColumn, "add_not_null_column"),
+            (ChangeType::ModifyColumnNullable, "set_not_null"),
+        ]
+    }
+
+    #[test]
+    fn test_each_op_blocked_without_its_allow() {
+        for (ct, _token) in guarded_cases() {
+            let diff = guarded_diff(ct.clone());
+            let blocked = evaluate_guarded_changes(&diff, &MigrationGuards::default());
+            assert_eq!(blocked.len(), 1, "{:?} must be blocked with no allow", ct);
+        }
+    }
+
+    #[test]
+    fn test_each_op_passes_with_its_allow() {
+        for (ct, token) in guarded_cases() {
+            let diff = guarded_diff(ct.clone());
+            let blocked = evaluate_guarded_changes(&diff, &allow_only(&[token]));
+            assert!(blocked.is_empty(), "{:?} must pass with --allow {}", ct, token);
+        }
+    }
+
+    #[test]
+    fn test_allow_does_not_unlock_a_different_op() {
+        // --allow-drop-column must NOT let a DropTable through (least-privilege).
+        let diff = guarded_diff(ChangeType::DropTable);
+        let blocked = evaluate_guarded_changes(&diff, &allow_only(&["drop_column"]));
+        assert_eq!(blocked.len(), 1, "drop_column allow must not unlock DropTable");
+        assert!(
+            blocked[0].contains("--allow-drop-table"),
+            "error must name the correct flag, got: {}",
+            blocked[0]
+        );
+    }
+
+    #[test]
+    fn test_error_message_names_exact_flag_per_op() {
+        let expected = [
+            (ChangeType::DropTable, "--allow-drop-table"),
+            (ChangeType::DropColumn, "--allow-drop-column"),
+            (ChangeType::ModifyColumnType, "--allow-column-type-change"),
+            (ChangeType::AddColumn, "--allow-add-not-null-column"),
+            (ChangeType::ModifyColumnNullable, "--allow-set-not-null"),
+        ];
+        for (ct, flag) in expected {
+            let diff = guarded_diff(ct.clone());
+            let blocked = evaluate_guarded_changes(&diff, &MigrationGuards::default());
+            assert!(
+                blocked[0].contains(flag),
+                "{:?} error must mention {}, got: {}",
+                ct,
+                flag,
+                blocked[0]
+            );
+        }
+    }
+
+    #[test]
+    fn test_force_bypasses_all_guarded_ops() {
+        for (ct, _token) in guarded_cases() {
+            let diff = guarded_diff(ct.clone());
+            let blocked = evaluate_guarded_changes(&diff, &MigrationGuards::force_all());
+            assert!(blocked.is_empty(), "--force must bypass {:?}", ct);
+        }
+    }
+
+    #[test]
+    fn test_skip_verification_does_not_unlock_diff_gate() {
+        // --dangerously-skip-verification governs gate #2 only; it must NOT grant
+        // any diff-gate allow.
+        let guards = MigrationGuards::new(vec![], true, false);
+        let diff = guarded_diff(ChangeType::DropColumn);
+        let blocked = evaluate_guarded_changes(&diff, &guards);
+        assert_eq!(blocked.len(), 1, "skip_verification must not unlock diff-gate ops");
+        assert!(guards.skip_verification(), "but it does bypass the verification gate");
+        assert!(!guards.allows_token("drop_column"));
+    }
+
+    #[test]
+    fn test_force_implies_skip_verification_and_all_allows() {
+        let g = MigrationGuards::force_all();
+        assert!(g.skip_verification());
+        assert!(g.allows_token("drop_table"));
+        assert!(g.allows_token("set_not_null"));
+        assert!(g.allows_token("anything_at_all"));
+    }
+
+    #[test]
+    fn test_safe_diff_never_blocked() {
+        let d = SchemaDiff::new(); // empty diff is safe
+        assert!(evaluate_guarded_changes(&d, &MigrationGuards::default()).is_empty());
+    }
+
+    #[test]
+    fn test_multiple_blocked_ops_each_listed() {
+        let mut d = SchemaDiff::new();
+        d.add_change(SchemaChange {
+            table: "t".to_string(),
+            change_type: ChangeType::DropTable,
+            column: None,
+            from_type: None,
+            to_type: None,
+            compatibility: ChangeCompatibility::DataLoss,
+            reason: None,
+        });
+        d.add_change(SchemaChange {
+            table: "t".to_string(),
+            change_type: ChangeType::DropColumn,
+            column: Some("c".to_string()),
+            from_type: None,
+            to_type: None,
+            compatibility: ChangeCompatibility::DataLoss,
+            reason: None,
+        });
+        // Permit only drop_table → drop_column remains blocked and is named.
+        let blocked = evaluate_guarded_changes(&d, &allow_only(&["drop_table"]));
+        assert_eq!(blocked.len(), 1);
+        assert!(blocked[0].contains("--allow-drop-column"));
     }
 }

@@ -7,8 +7,8 @@ use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
     ChangeCompatibility, ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer,
-    GatewayFunctionInstaller, MigrationRunner, SchemaDiff, SchemaDiffChecker, SchemaVerifier,
-    TableDeployer,
+    GatewayFunctionInstaller, MigrationGuards, MigrationRunner, SchemaDiff, SchemaDiffChecker,
+    SchemaVerifier, TableDeployer,
 };
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,14 @@ pub struct MigrateRequest {
     pub schema_name: String,
     /// Required: specific database/tenant to migrate (e.g., "main" for main DB, or tenant ID for tenant DB)
     pub database_id: String,
+    /// Per-operation allow-tokens for guarded destructive changes
+    /// (e.g. ["drop_column", "modify_column_type"]). Empty by default.
+    #[serde(default)]
+    pub allow: Vec<String>,
+    /// Bypass the holistic post-migration schema-verification gate only.
+    #[serde(default)]
+    pub skip_verification: bool,
+    /// Legacy allow-all: permits every guarded op AND skips verification.
     #[serde(default)]
     pub force: bool,
 }
@@ -147,6 +155,14 @@ pub async fn migrate_schema(
     let schema_verifier = SchemaVerifier::new();
     let diff_checker = SchemaDiffChecker::new();
 
+    // Operator-granted permissions for guarded destructive operations.
+    // force=true preserves the legacy allow-all behavior.
+    let guards = MigrationGuards::new(
+        request.allow.clone(),
+        request.skip_verification,
+        request.force,
+    );
+
     let mut databases_updated = Vec::new();
     let mut total_migrations = 0;
     let mut total_tables = 0;
@@ -195,7 +211,7 @@ pub async fn migrate_schema(
         // Validate schema changes before migration (only once, on first database)
         if i == 0 {
             let diff = diff_checker
-                .validate_migration(&pool, db_name, &tables_dir, &migrations_dir, request.force)
+                .validate_migration(&pool, db_name, &tables_dir, &migrations_dir, &guards)
                 .await?;
             schema_validation = Some(diff_to_validation_info(&diff));
         }
@@ -262,8 +278,9 @@ pub async fn migrate_schema(
                 },
             });
 
-            // If verification failed and not forced, return error
-            if !verification.passed && !request.force {
+            // If verification failed and not bypassed, return error.
+            // Gate #2 is bypassed by --dangerously-skip-verification or allow-all --force.
+            if !verification.passed && !guards.skip_verification() {
                 return Err(GatewayError::MigrationFailed {
                     database: db_name.clone(),
                     migration: "schema verification".to_string(),

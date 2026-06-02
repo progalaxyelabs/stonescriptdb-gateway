@@ -6,8 +6,8 @@ use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
 use crate::schema::{
     ChangeCompatibility, ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer,
-    GatewayFunctionInstaller, MigrationRunner, SchemaDiff, SchemaDiffChecker, SchemaVerifier,
-    TableDeployer,
+    GatewayFunctionInstaller, MigrationGuards, MigrationRunner, SchemaDiff, SchemaDiffChecker,
+    SchemaVerifier, TableDeployer,
 };
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,13 @@ pub use crate::api::migrate::MigrateState;
 pub struct MigrateAllRequest {
     pub platform: String,
     pub schema_name: String,
+    /// Per-operation allow-tokens for guarded destructive changes. Empty by default.
+    #[serde(default)]
+    pub allow: Vec<String>,
+    /// Bypass the holistic post-migration schema-verification gate only.
+    #[serde(default)]
+    pub skip_verification: bool,
+    /// Legacy allow-all: permits every guarded op AND skips verification.
     #[serde(default)]
     pub force: bool,
 }
@@ -175,6 +182,14 @@ pub async fn migrate_all_schema(
     let schema_verifier = SchemaVerifier::new();
     let diff_checker = SchemaDiffChecker::new();
 
+    // Operator-granted permissions for guarded destructive operations.
+    // Applied identically to every tenant database in this run.
+    let guards = MigrationGuards::new(
+        request.allow.clone(),
+        request.skip_verification,
+        request.force,
+    );
+
     let mut results = Vec::new();
     let mut schema_validation: Option<SchemaValidationInfo> = None;
     let mut succeeded = 0;
@@ -208,7 +223,7 @@ pub async fn migrate_all_schema(
             &function_deployer,
             &schema_verifier,
             &diff_checker,
-            request.force,
+            &guards,
             i == 0, // validate schema only on first database
         )
         .await
@@ -370,7 +385,7 @@ async fn migrate_single_database(
     function_deployer: &FunctionDeployer,
     schema_verifier: &SchemaVerifier,
     diff_checker: &SchemaDiffChecker,
-    force: bool,
+    guards: &MigrationGuards,
     validate_schema: bool,
 ) -> std::result::Result<(usize, usize, usize, Option<SchemaDiff>), GatewayError> {
     let pool = pool_manager.get_pool_by_name(db_name).await?;
@@ -386,7 +401,7 @@ async fn migrate_single_database(
     // Validate schema changes (only on first database)
     let diff = if validate_schema {
         let d = diff_checker
-            .validate_migration(&pool, db_name, tables_dir, migrations_dir, force)
+            .validate_migration(&pool, db_name, tables_dir, migrations_dir, guards)
             .await?;
         Some(d)
     } else {
@@ -431,7 +446,7 @@ async fn migrate_single_database(
             )
             .await?;
 
-        if !verification.passed && !force {
+        if !verification.passed && !guards.skip_verification() {
             return Err(GatewayError::MigrationFailed {
                 database: db_name.to_string(),
                 migration: "schema verification".to_string(),

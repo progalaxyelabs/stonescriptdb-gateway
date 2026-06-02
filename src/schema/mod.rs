@@ -21,7 +21,7 @@ pub use changelog::{ChangelogManager, ChangelogEntry, ChangelogRecord, ChangeTyp
 pub use column_type_exemptions::{ColumnTypeExemption, scan_migrations_for_exemptions};
 pub use custom_types::CustomTypeManager;
 pub use dependency::{DependencyAnalyzer, DependencyAnalysis, TableInfo, ForeignKeyDependency};
-pub use diff::{SchemaDiffChecker, SchemaDiff, SchemaChange, ChangeType, ChangeCompatibility, ColumnSchema, TableSchema, MigrationExemptions};
+pub use diff::{SchemaDiffChecker, SchemaDiff, SchemaChange, ChangeType, ChangeCompatibility, ColumnSchema, TableSchema, MigrationExemptions, MigrationGuards, guarded_op_token};
 pub use extensions::ExtensionManager;
 pub use extractor::SchemaExtractor;
 pub use functions::FunctionDeployer;

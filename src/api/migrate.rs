@@ -3,8 +3,10 @@
 //! POST /v2/migrate - Migrate databases using stored schema
 
 use crate::api::platform::PlatformState;
+use crate::config::Config;
 use crate::error::{GatewayError, Result};
 use crate::pool::PoolManager;
+use crate::xdb::{self, CrossDbLinkAuthorization, CrossDbReader};
 use crate::schema::{
     ChangeCompatibility, ChangelogManager, CustomTypeManager, ExtensionManager, FunctionDeployer,
     GatewayFunctionInstaller, MigrationGuards, MigrationRunner, SchemaDiff, SchemaDiffChecker,
@@ -20,6 +22,8 @@ use tracing::info;
 pub struct MigrateState {
     pub pool_manager: Arc<PoolManager>,
     pub platform_state: Arc<PlatformState>,
+    /// Full gateway config — needed for the privileged cross-DB-link URL (#2908).
+    pub config: Config,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +42,11 @@ pub struct MigrateRequest {
     /// Legacy allow-all: permits every guarded op AND skips verification.
     #[serde(default)]
     pub force: bool,
+    /// Authorization for the gated cross-DB-link capability (#2908). Absent/`authorized:false`
+    /// ⇒ any `cross_db/<link>.json` manifest in the bundle is REJECTED (fail-closed).
+    /// This block is the contract deploy-manager (#2909) plumbs from `--allow-cross-db-link`.
+    #[serde(default)]
+    pub cross_db_link: Option<CrossDbLinkAuthorization>,
 }
 
 #[derive(Serialize)]
@@ -145,6 +154,10 @@ pub async fn migrate_schema(
         .platform_state
         .schema_store
         .seeders_dir(&request.platform, &request.schema_name);
+    let cross_db_dir = state
+        .platform_state
+        .schema_store
+        .cross_db_dir(&request.platform, &request.schema_name);
 
     let changelog_manager = ChangelogManager::new();
     let extension_manager = ExtensionManager::new();
@@ -235,6 +248,33 @@ pub async fn migrate_schema(
         let functions = function_deployer
             .deploy_functions(&pool, db_name, &functions_dir)
             .await?;
+
+        // 4b. Materialise gated cross-DB links into staging tables BEFORE migrations run,
+        //     so a migration can read `_stonescriptdb_gateway_xdb_<link>`. Fail-closed:
+        //     manifests present without authorization ⇒ hard error (never skipped).
+        let cross_db_manifests = xdb::load_manifests(&cross_db_dir)?;
+        let authz = request.cross_db_link.clone().unwrap_or_default();
+        let xdb_reader = CrossDbReader::from_privileged_url(
+            state.config.privileged_database_url.as_deref(),
+            state.config.max_connections_per_pool,
+        );
+        let materialized = xdb::materialize_links(
+            &cross_db_manifests,
+            &authz,
+            xdb_reader.as_ref(),
+            &pool,
+            state.pool_manager.admin_pool(),
+            db_name,
+            &request.platform,
+        )
+        .await?;
+        if !materialized.is_empty() {
+            info!(
+                "cross_db_link: materialised {} link(s) into '{}'",
+                materialized.len(),
+                db_name
+            );
+        }
 
         // 5. Run migrations (ALTER TABLE, etc. — after base schema is fully deployed)
         let migrations = migration_runner

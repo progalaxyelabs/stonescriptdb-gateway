@@ -8,6 +8,12 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub database_url: String,
+    /// Optional PRIVILEGED database URL for the gated cross-DB-link capability (task #2908).
+    ///
+    /// STRICTLY ISOLATED from `database_url`: only the `xdb` module ever reads this.
+    /// `None` (env unset) ⇒ the cross-DB-link capability is OFF. The role behind this URL
+    /// is expected to be READ-ONLY on the foreign (auth) DB by Postgres grants.
+    pub privileged_database_url: Option<String>,
     pub gateway_host: String,
     pub gateway_port: u16,
     pub max_connections_per_pool: u32,
@@ -50,6 +56,10 @@ impl Config {
 
             format!("postgres://{}:{}@{}:{}/{}", db_user, encoded_password, db_host, db_port, db_name)
         };
+
+        // Privileged URL for the gated cross-DB-link capability. Default OFF (None).
+        // Never logged; redact if you add diagnostics here.
+        let privileged_database_url = env::var("PRIVILEGED_DATABASE_URL").ok();
 
         let gateway_host = env::var("GATEWAY_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
 
@@ -138,6 +148,7 @@ impl Config {
 
         Ok(Config {
             database_url,
+            privileged_database_url,
             gateway_host,
             gateway_port,
             max_connections_per_pool,

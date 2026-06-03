@@ -231,6 +231,11 @@ impl SchemaStore {
     pub fn migrations_dir(&self, platform: &str, schema_name: &str) -> PathBuf {
         self.schema_dir(platform, schema_name).join("migrations")
     }
+
+    /// Directory holding cross-DB-link manifests (`cross_db/<link>.json`), task #2908.
+    pub fn cross_db_dir(&self, platform: &str, schema_name: &str) -> PathBuf {
+        self.schema_dir(platform, schema_name).join("cross_db")
+    }
 }
 
 /// Check if a directory has schema structure (at least tables or functions)

@@ -7,6 +7,7 @@ mod pool;
 mod registry;
 mod schema;
 mod security;
+mod xdb;
 
 use crate::api::{
     accept_invite, admin_create_tenant, admin_list_databases, call_function, change_password,
@@ -119,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
     let migrate_state = Arc::new(MigrateState {
         pool_manager: pool_manager.clone(),
         platform_state: platform_state.clone(),
+        config: config.clone(),
     });
 
     // Start time for uptime tracking

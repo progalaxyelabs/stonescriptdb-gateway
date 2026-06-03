@@ -241,6 +241,7 @@ mod tests {
         // Create a config in dev mode
         let mut config = Config {
             database_url: "postgres://test".to_string(),
+            privileged_database_url: None,
             gateway_host: "127.0.0.1".to_string(),
             gateway_port: 9000,
             max_connections_per_pool: 10,
